@@ -1,33 +1,130 @@
-# FastAPI + React Template
+# SkillSwap
 
-FastAPI backend + Vite/React/TypeScript frontend, deployed to Vercel as one project.
+SkillSwap is a peer-to-peer learning platform where members can share skills they teach, find skills they want to learn, and arrange learning sessions.
 
-```
-backend/    FastAPI app (routes under /api)
-frontend/   Vite + React + TypeScript
-vercel.json Vercel setup: /api/* goes to backend, everything else to frontend
-```
+> **Project status:** In development. The repository currently contains a React and FastAPI starter application; the SkillSwap features below are planned and are not yet implemented.
 
-## Requirements
+## Project goals
 
-- [Python](https://www.python.org/downloads/) 3.10+
-- [Node.js](https://nodejs.org/) 22+
+- Build a full-stack web application with React, TypeScript, and FastAPI.
+- Provide REST APIs for skill listings, session requests, and member profiles.
+- Enforce authentication, role-based access control (RBAC), and permission scopes on the backend.
+- Keep the initial release small enough to complete and demonstrate.
 
-> On macOS/Linux, use `python3` instead of `python`.
+## Planned features
 
-## Run locally
+### MVP — Mid-term demo
 
-**Backend** (terminal 1):
+- Browse available skill listings.
+- Create, view, edit, and delete your own listings.
+- Send and respond to session requests.
+- View request status.
+- Run the frontend and backend locally.
 
-```bash
+### Beta — Final demo
+
+- Register and sign in.
+- Give members, moderators, and administrators distinct permissions.
+- Restrict actions using authorization scopes.
+- Provide a member profile dashboard.
+- Deploy the application.
+
+## User roles
+
+| Role | Main permissions |
+| --- | --- |
+| **Member** | Browse listings, manage their own listings, and create or respond to session requests. Members can both teach and learn. |
+| **Moderator** | Review reports and hide inappropriate listings. |
+| **Administrator** | Manage users, categories, and listings across the platform. |
+
+Authorization must be enforced by the backend. For example, members may manage only their own listings, while administrators may manage listings across the platform.
+
+## Current implementation
+
+The starter application currently includes:
+
+- A FastAPI backend with `GET /api/health` and `GET /api/hello`.
+- A React and TypeScript frontend with a form that calls `/api/hello`.
+- A Vite development proxy that forwards `/api` requests to the local backend.
+- FastAPI's interactive API documentation at `/docs`.
+- A Vercel configuration for the frontend and backend services.
+
+Skill listings, session requests, user accounts, authentication, authorization, persistence, and the planned roles are not implemented yet. The database technology has not been selected.
+
+## Technology stack
+
+- **Frontend:** React, TypeScript, Vite
+- **Backend:** FastAPI, Python
+- **Communication:** REST APIs
+- **Authentication and authorization:** Planned
+- **Database:** To be selected
+
+## Planned API
+
+These routes describe the intended API and may change during implementation.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/skills` | Browse skill listings |
+| `POST` | `/api/skills` | Create a skill listing |
+| `GET` | `/api/skills/{skill_id}` | View a listing |
+| `PATCH` | `/api/skills/{skill_id}` | Update an owned listing |
+| `DELETE` | `/api/skills/{skill_id}` | Delete an owned listing |
+| `POST` | `/api/session-requests` | Request a learning session |
+| `GET` | `/api/session-requests` | View requests available to the signed-in member |
+| `PATCH` | `/api/session-requests/{request_id}` | Respond to or update a request |
+| `GET` | `/api/users/me` | View the signed-in member's profile |
+
+## Authorization scope examples
+
+The backend may use scopes such as:
+
+- `skills:read` — browse skill listings
+- `skills:create` — create a listing
+- `skills:update:own` — update your own listings
+- `requests:create` — create a session request
+- `requests:respond` — respond to a request
+- `reports:review` — review reported content
+- `users:manage` — administer user accounts
+
+These are examples; final scope names should match the authorization implementation.
+
+## Local development
+
+### Requirements
+
+- Python 3.10 or later
+- Node.js 22 or later
+
+### Start the backend
+
+From the repository root, create a virtual environment and install the backend dependencies.
+
+**Windows PowerShell:**
+
+```powershell
 cd backend
-python -m venv .venv
-.venv\Scripts\Activate.ps1      # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 fastapi dev main.py
 ```
 
-**Frontend** (terminal 2):
+**macOS or Linux:**
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+fastapi dev main.py
+```
+
+The API runs at `http://localhost:8000`; interactive documentation is at `http://localhost:8000/docs`.
+
+### Start the frontend
+
+In a second terminal, from the repository root:
 
 ```bash
 cd frontend
@@ -35,38 +132,18 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and click **Say hello**. Vite forwards `/api` requests to the backend on port 8000.
+Open the local address printed by Vite (typically `http://localhost:5173`). The Vite development server forwards `/api` requests to the backend on port `8000`.
 
-To run it the way Vercel does instead, from the project root:
+## Deployment
 
-```bash
-npm install -g vercel
-vercel dev -L
-```
+The repository includes a `vercel.json` configuration for deploying the frontend and backend as Vercel services. To deploy, import the repository in Vercel and follow the project's deployment setup. Configure deployment settings and environment variables in the Vercel project before enabling production use.
 
-> Add new Python packages to `backend/requirements.txt`.
+## Configuration and security
 
-## Class exercise
+The application does not yet implement authentication, authorization, or database configuration. As those features are added:
 
-Send an ID, name and email from React to FastAPI and show the reply.
-
-1. In `backend/main.py`, uncomment the `EXERCISE (part 1)` block. Try `POST /api/user` at http://localhost:8000/docs.
-2. In `frontend/src/App.tsx`, uncomment `<UserForm />` and the `UserForm` function (`EXERCISE (part 2)`).
-3. Fill in the form at http://localhost:5173 and click **Send**.
-
-Try an invalid email (send it from `/docs`, since the browser blocks it in the form): FastAPI returns `422` without any extra code.
-
-## Deploy to Vercel
-
-1. Push the repo to GitHub.
-2. Go to https://vercel.com/new, import the repo and click **Deploy**. Keep **Root Directory** as `./`.
-
-Every push to `main` redeploys automatically. Or deploy from your machine with `vercel --prod`.
-
-## Troubleshooting
-
-- **"Running scripts is disabled" in PowerShell:** run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
-- **`fastapi` not found:** activate the virtual environment first.
-- **`Request failed: 500` in the app:** the backend isn't running.
-- **App at localhost:8000 shows an old version:** delete `frontend/dist`.
-- **Vercel build fails:** check **Build Logs** in the Vercel dashboard, and make sure `npm run build` works in `frontend/`.
+- Keep secrets out of source control and load them from environment variables (for example, `DATABASE_URL`, `JWT_SECRET_KEY`, and `CORS_ORIGINS`).
+- Validate required configuration when the backend starts.
+- Enforce permissions and listing ownership in the backend, not only in the frontend.
+- Store passwords using an established password-hashing method.
+- Give each role only the permissions it needs.
