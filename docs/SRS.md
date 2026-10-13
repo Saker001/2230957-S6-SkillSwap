@@ -1,144 +1,275 @@
-# Software Requirements Specification (SRS)
+# Software Requirements Specification (SRS) — SkillSwap
+
+| Field | Value |
+|---|---|
+| Product | SkillSwap |
+| Version | MVP + Beta |
+| Releases | MVP — Mid-term, Beta — Final |
+| Status | Draft |
+| Related docs | [Product Requirements Document (PRD)](PRD.md), [Technical Design Document (TDD)](TDD.md) |
+
+Every requirement has a **Release** column or label: **MVP** is built for the mid-term; **Beta** extends it for the final.
+
+**Documents in this set**
+
+| Short form | Full form | Purpose | File |
+|---|---|---|---|
+| PRD | Product Requirements Document | What we build and why | [PRD.md](PRD.md) |
+| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria (this document) | [SRS.md](SRS.md) |
+| TDD | Technical Design Document | How we build it: architecture, data model, and API | [TDD.md](TDD.md) |
 
 ## 1. Introduction
 
 ### 1.1 Purpose
 
-This specification defines the externally observable requirements for SkillSwap and separates the mid-term MVP from the final-demo Beta. It is intended for implementation, testing, and course-project review.
+This document specifies SkillSwap's externally observable requirements for the MVP (skill listings and session requests) and Beta (accounts, profiles, roles, scopes, moderation, administration, and deployment).
 
-### 1.2 Product scope
+### 1.2 Scope
 
-SkillSwap is a web application for publishing skills, discovering learning opportunities, and arranging peer-to-peer session requests. The planned stack is a React and TypeScript frontend, a FastAPI and Python REST backend, and a database that has not yet been selected.
+- **MVP:** users browse and manage skill listings and use a REST API to request and respond to learning sessions. The application runs locally.
+- **Beta:** registered members use profiles and authenticated APIs; member, moderator, and administrator actions are authorized on the backend.
+- The system uses a React + TypeScript frontend and FastAPI + Python backend.
+- Out of scope: payments, real-time chat/video, mobile applications, and calendar integrations. See [PRD, section 5](PRD.md#5-scope).
 
-### 1.3 Current implementation status
+### 1.3 Definitions
 
-The repository currently has a React frontend that calls `GET /api/hello`, a FastAPI backend providing `GET /api/health` and `GET /api/hello`, a Vite API proxy, and Vercel service configuration. The requirements below are planned. Listings, requests, persistence, user accounts, roles, and authorization are not implemented.
+| Term | Meaning |
+|---|---|
+| Skill listing | A member-authored description of a skill they can teach. |
+| Session request | A learner's request to arrange a learning session for a skill listing. |
+| Listing owner | The member who created a skill listing and can respond to requests for it. |
+| CRUD | Create, Read, Update, Delete |
+| REST | API style that uses resources and HTTP methods such as GET, POST, PATCH, and DELETE. |
+| RBAC | Role-Based Access Control: access is granted according to a user's role. |
+| Scope | A permission representing an allowed operation, such as `skills:create`. |
+| MVP | Mid-term release focused on the core listing and session-request workflow. |
+| Beta | Final release that adds accounts, authorization, profiles, administration, and deployment. |
 
-## 2. System context
+## 2. Overall description
 
-The system consists of:
+### 2.1 System context
 
-- **Web client:** React with TypeScript; presents listing, request, and profile screens.
-- **REST API:** FastAPI; validates input, applies business rules, enforces permissions, and accesses persistent data.
-- **Database:** Not selected; stores users, categories, listings, requests, and reports as features are implemented.
+```mermaid
+flowchart LR
+    Client[Browser / React and TypeScript] -->|JSON REST| API[FastAPI backend]
+    API -->|MVP persistence| DB[(Database to be selected)]
+    API -->|Beta identity and authorization| Auth[Account and permission services]
+```
 
-The browser must treat the API as authoritative for validation, request status, and authorization decisions.
+The repository currently provides a React starter, a FastAPI health/hello API, a Vite proxy, and Vercel configuration. The requirements below describe planned SkillSwap behavior; the listing, request, persistence, and account features are not implemented yet.
 
-## 3. User classes
+### 2.2 Users and roles
 
-| User class | Description | Release |
-| --- | --- | --- |
-| Visitor | Unauthenticated user who can browse public listing information. | MVP |
-| Member | User who can teach and learn, maintain their own listings, and participate in relevant session requests. | MVP/Beta |
-| Moderator | User trusted to review reports and hide inappropriate listings. | Beta |
-| Administrator | User who manages platform users, categories, and listings. | Beta |
+| User class / role | Release | Description |
+|---|---|---|
+| Visitor | MVP | Browses public skill listings and views listing details. |
+| Member | MVP/Beta | Can teach and learn, manage own listings, and participate in relevant requests. MVP identity is a demo concern; Beta identity is authenticated. |
+| Moderator | Beta | Reviews reports and hides inappropriate listings. |
+| Administrator | Beta | Manages users, categories, and listings across the platform. |
 
-## 4. Functional requirements
+### 2.3 Use cases
 
-### 4.1 Skill listings
+**MVP**
 
-| ID | Release | Requirement |
-| --- | --- | --- |
-| SRS-F01 | MVP | The API shall return a collection of available skill listings. |
-| SRS-F02 | MVP | A visitor shall be able to retrieve an individual listing by its identifier. |
-| SRS-F03 | MVP | A member shall be able to create a listing with the required skill information. |
-| SRS-F04 | MVP | A member shall be able to update or delete only a listing they own. |
-| SRS-F05 | MVP | The API shall validate required fields and reject invalid listing data with a client-error response. |
-| SRS-F06 | Beta | A moderator shall be able to hide a listing after reviewing a report. |
-| SRS-F07 | Beta | An administrator shall be able to manage listings regardless of owner. |
+```mermaid
+flowchart LR
+    Learner((Learner))
+    Teacher((Listing owner))
+    subgraph System[SkillSwap]
+        UC1([Browse skills])
+        UC2([View listing])
+        UC3([Create or manage listing])
+        UC4([Request learning session])
+        UC5([Accept or decline request])
+        UC6([View request status])
+    end
+    Learner --- UC1
+    Learner --- UC2
+    Teacher --- UC3
+    Learner --- UC4
+    Teacher --- UC5
+    Learner --- UC6
+    Teacher --- UC6
+```
 
-### 4.2 Session requests
+**Beta**
 
-| ID | Release | Requirement |
-| --- | --- | --- |
-| SRS-F08 | MVP | A member shall be able to create a request for an available listing. |
-| SRS-F09 | MVP | The listing owner shall be able to accept or decline a request addressed to them. |
-| SRS-F10 | MVP | A participant shall be able to list only session requests in which they are involved. |
-| SRS-F11 | MVP | A request shall have a defined status, initially `pending`, and transition to `accepted` or `declined` after the owner's response. |
-| SRS-F12 | Beta | The backend shall verify participant identity and request ownership for each request operation. |
+```mermaid
+flowchart LR
+    Member((Member))
+    Moderator((Moderator))
+    Admin((Administrator))
+    subgraph System[SkillSwap Beta]
+        UC1([Register and sign in])
+        UC2([View and update own profile])
+        UC3([Manage own listings and requests])
+        UC4([Review reports and hide listings])
+        UC5([Manage users, categories, listings])
+    end
+    Member --- UC1
+    Member --- UC2
+    Member --- UC3
+    Moderator --- UC4
+    Admin --- UC5
+```
 
-### 4.3 Accounts, roles, and profiles
+### 2.4 Constraints
 
-| ID | Release | Requirement |
-| --- | --- | --- |
-| SRS-F13 | Beta | A visitor shall be able to register with valid account details. |
-| SRS-F14 | Beta | A registered user shall be able to authenticate and sign out. |
-| SRS-F15 | Beta | An authenticated member shall be able to retrieve and update permitted fields in their own profile. |
-| SRS-F16 | Beta | The backend shall assign or verify a user's role and required permission scope before protected operations. |
-| SRS-F17 | Beta | A moderator shall be able to review reports and hide inappropriate listings. |
-| SRS-F18 | Beta | An administrator shall be able to manage users and categories. |
+- The frontend shall use React and TypeScript; the backend shall use FastAPI and Python.
+- The frontend and backend communicate through JSON REST APIs.
+- The database is not yet selected. The design must support local development and persistence across restarts.
+- The MVP must be demonstrable locally. Deployment is planned for Beta.
+- Authentication is not implemented in the current starter and is a Beta feature.
 
-## 5. External interface requirements
+### 2.5 Assumptions
 
-### 5.1 User interface
+- A member may be both a teacher and a learner.
+- A request initially represents an interest in a listing; time coordination can happen outside the application.
+- The listing owner is the teacher for a request created against that listing.
+- Production ownership and role checks require authenticated identity and must be enforced by the backend.
 
-- The frontend shall provide a listing browse/detail experience and forms for applicable listing and session-request operations. (MVP)
-- The frontend shall display validation errors and request status returned by the API. (MVP)
-- The frontend shall provide account and profile views after authentication is implemented. (Beta)
-- The frontend may hide controls the current user cannot use, but this is usability behavior and not a substitute for backend authorization. (Beta)
+## 3. Functional requirements
 
-### 5.2 API interface
+### 3.1 Skill listings — MVP
 
-The planned API uses JSON over HTTP. Route names may evolve with implementation.
+| ID | Requirement |
+|---|---|
+| SRS-F01 | The API shall return available skill listings. |
+| SRS-F02 | A client shall be able to retrieve an individual listing by its identifier. |
+| SRS-F03 | A member shall be able to create a listing with valid required fields. |
+| SRS-F04 | A member shall be able to update or delete only their own listing. |
+| SRS-F05 | The API shall validate listing data and reject invalid payloads with an appropriate client-error response. |
+| SRS-F06 | A listing that is hidden or unavailable shall not be offered for a new session request. |
 
-| Method | Path | Purpose | Release |
-| --- | --- | --- | --- |
-| `GET` | `/api/skills` | Browse available listings | MVP |
-| `POST` | `/api/skills` | Create a listing | MVP |
-| `GET` | `/api/skills/{skill_id}` | Retrieve a listing | MVP |
-| `PATCH` | `/api/skills/{skill_id}` | Update an owned listing | MVP |
-| `DELETE` | `/api/skills/{skill_id}` | Delete an owned listing | MVP |
-| `POST` | `/api/session-requests` | Create a session request | MVP |
-| `GET` | `/api/session-requests` | List requests available to the caller | MVP |
-| `PATCH` | `/api/session-requests/{request_id}` | Respond to or update a request | MVP |
-| `POST` | `/api/auth/register` | Register an account | Beta |
-| `POST` | `/api/auth/token` | Authenticate and obtain credentials | Beta |
-| `GET` | `/api/users/me` | Retrieve the signed-in user's profile | Beta |
+### 3.2 Session requests — MVP
 
-The API shall use standard HTTP status codes: `2xx` for successful operations, `4xx` for invalid input or unauthorized/forbidden/not-found resources, and `5xx` for unexpected server failures. Error responses shall not include secrets or stack traces.
+| ID | Requirement |
+|---|---|
+| SRS-F07 | A learner shall be able to create a request for an available listing. |
+| SRS-F08 | A request shall identify its listing, learner, listing owner, message/learning goal, status, and timestamps. |
+| SRS-F09 | A request shall begin in `pending` status. |
+| SRS-F10 | The listing owner shall be able to accept or decline a pending request. |
+| SRS-F11 | A participant shall be able to view only requests in which they are involved. |
+| SRS-F12 | The API shall reject responses by a caller who is not the listing owner and reject invalid terminal status transitions. |
 
-### 5.3 Database interface
+### 3.3 Authentication and profile — Beta
 
-The database engine and persistence library are design decisions still to be made. Once selected, the API shall persist data across application restarts and enforce referential integrity for related records. (MVP)
+| ID | Requirement |
+|---|---|
+| SRS-F13 | A visitor shall be able to register with valid account details. |
+| SRS-F14 | A registered member shall be able to authenticate and sign out. |
+| SRS-F15 | An authenticated member shall be able to retrieve and update permitted fields in their own profile. |
+| SRS-F16 | The backend shall associate each authenticated operation with the identity from verified credentials, not a client-supplied user identifier. |
 
-## 6. Data requirements
+### 3.4 Roles (RBAC) and administration — Beta
 
-The initial logical entities are:
+| ID | Requirement |
+|---|---|
+| SRS-F17 | The backend shall authorize each protected operation according to the caller's role and required scope. |
+| SRS-F18 | A member shall manage their own listings and participate in their own session requests. |
+| SRS-F19 | A moderator shall review reports and hide inappropriate listings. |
+| SRS-F20 | An administrator shall manage users, categories, and listings across the platform. |
+| SRS-F21 | The client may hide unavailable controls, but the API shall independently enforce every permission. |
 
-- **SkillListing:** identifier, owner, title, description, category, availability/status, created timestamp, updated timestamp.
-- **SessionRequest:** identifier, listing, learner, teacher/listing owner, message or learning goal, status, created timestamp, updated timestamp.
-- **User (Beta):** identifier, email, password hash, display name, role, profile fields, created timestamp.
-- **Category:** identifier, name, description.
-- **Report (Beta):** identifier, reporter, listing, reason, status, created timestamp, review metadata.
+### 3.5 Validation rules
 
-The final field definitions, deletion behavior, and indexes must be established alongside the database selection and migrations.
+| Data | Rule | Release |
+|---|---|---|
+| Skill title | Required, non-empty after trimming, and within a documented maximum length. | MVP |
+| Skill description | Required and within a documented maximum length. | MVP |
+| Category | Must refer to a valid category when categories are enabled. | MVP/Beta |
+| Request listing | Must reference an existing available listing. | MVP |
+| Request status | Must be one of `pending`, `accepted`, or `declined`; only the listing owner may respond. | MVP |
+| Account email | Required and unique; normalize and validate before account creation. | Beta |
+| Password | Must satisfy documented minimum policy and be stored only as a password hash. | Beta |
 
-## 7. Non-functional requirements
+Exact maximum lengths and password policy shall be defined with implementation and tested consistently in the API.
 
-| ID | Release | Requirement |
-| --- | --- | --- |
-| SRS-NF01 | MVP | Backend input validation shall be performed independently of browser-side validation. |
-| SRS-NF02 | MVP | The local development setup shall run the API and frontend with documented commands. |
-| SRS-NF03 | MVP | The API shall return deterministic JSON response shapes for documented operations. |
-| SRS-NF04 | Beta | Protected actions shall be authorized on every backend request; frontend checks alone shall never grant access. |
-| SRS-NF05 | Beta | Passwords shall be stored only as salted password hashes produced by a maintained hashing library. |
-| SRS-NF06 | Beta | Authentication secrets and deployment configuration shall come from environment variables or a managed secret store. |
-| SRS-NF07 | Beta | The application shall validate authentication and authorization failures without disclosing whether sensitive credentials are correct. |
-| SRS-NF08 | Beta | Production deployment shall use HTTPS and secure cookie/token handling appropriate to the selected authentication design. |
-| SRS-NF09 | Beta | Tests shall cover API validation, listing ownership, request participation, and role/scope authorization. |
+### 3.6 Session-request states
 
-## 8. Business rules
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> accepted: listing owner accepts
+    pending --> declined: listing owner declines
+    accepted --> [*]
+    declined --> [*]
+```
 
-1. A member may teach and learn; role does not limit them to one side of an exchange.
-2. A session request must reference an existing, available listing.
-3. The listing owner cannot respond to a request as the learner.
-4. Only the listing owner may accept or decline that listing's session request.
-5. Members may edit or delete only their own listings; Beta administrators may manage platform listings.
-6. A listing hidden by a moderator is not available for new session requests.
-7. The backend is the source of truth for identity, ownership, status transitions, and permission checks.
+The MVP does not include rescheduling, cancellation, or reopening terminal requests.
 
-## 9. Acceptance and verification
+### 3.7 Permission matrix — Beta
 
-- **MVP acceptance:** Exercise listing browse/detail/create/update/delete and session-request create/respond/status flows against a locally running API; verify invalid data and ownership violations are rejected.
-- **Beta acceptance:** Exercise registration/sign-in, profile access, and role-specific endpoints; verify member, moderator, and administrator permissions with automated API tests, including denied requests.
-- **Documentation acceptance:** Keep route, field, and release descriptions aligned with the implemented API as the project evolves.
+| Action | Visitor | Member | Moderator | Administrator |
+|---|---:|---:|---:|---:|
+| Browse public listings | Yes | Yes | Yes | Yes |
+| Create listing | No | Yes | Yes, as a member | Yes |
+| Update/delete own listing | No | Yes | Yes, as a member | Yes |
+| Manage another member's listing | No | No | Hide/review only | Yes |
+| Create session request | No | Yes | Yes, as a member | Yes |
+| Respond to request as listing owner | No | Own listing only | Own listing only | Per administrative policy |
+| Review reports/hide listings | No | No | Yes | Yes |
+| Manage users and categories | No | No | No | Yes |
+
+All permissions in this matrix are enforced by the backend in Beta. The MVP does not provide production account authentication.
+
+### 3.8 Status codes
+
+| Status | Meaning | Typical use |
+|---|---|---|
+| `200 OK` | Request succeeded | Read or update resource |
+| `201 Created` | Resource created | Create listing, request, or account |
+| `204 No Content` | Operation succeeded without response body | Delete resource |
+| `401 Unauthorized` | Authentication missing or invalid | Beta protected endpoint |
+| `403 Forbidden` | Caller is authenticated but lacks permission | Ownership, role, or scope failure |
+| `404 Not Found` | Resource does not exist or is not visible to caller | Listing/request lookup |
+| `409 Conflict` | Operation conflicts with current state | Duplicate account email or invalid state transition |
+| `422 Unprocessable Entity` | Input validation failed | Invalid request body |
+| `500 Internal Server Error` | Unexpected server failure | Generic response; do not expose stack trace |
+
+## 4. Non-functional requirements
+
+| ID | Requirement | Release |
+|---|---|---|
+| SRS-NF01 | API inputs shall be validated by the backend independently of browser validation. | MVP |
+| SRS-NF02 | API operations shall return documented JSON shapes and appropriate HTTP status codes. | MVP |
+| SRS-NF03 | The frontend and backend shall run locally using documented setup commands. | MVP |
+| SRS-NF04 | Persistent application data shall survive backend restarts. | MVP |
+| SRS-NF05 | Every protected operation shall be authorized by the backend on each request. | Beta |
+| SRS-NF06 | Passwords shall be stored as salted hashes using a maintained password-hashing library. | Beta |
+| SRS-NF07 | Secrets shall be supplied via environment configuration or a managed secret store, not committed to source control. | Beta |
+| SRS-NF08 | Errors shall not reveal passwords, tokens, secret configuration, or internal stack traces. | Beta |
+| SRS-NF09 | Production traffic shall use HTTPS and secure credential handling for the selected authentication design. | Beta |
+| SRS-NF10 | Automated tests shall cover validation, ownership, request participation, and role/scope authorization. | Beta |
+
+## 5. Acceptance criteria
+
+### MVP
+
+- A visitor can browse available listings and view a listing detail.
+- A member can create, update, and delete a listing; an attempt to modify a listing they do not own is rejected by the API's demo ownership strategy.
+- A learner can create a request for an available listing.
+- The listing owner can accept or decline the pending request; unrelated users cannot respond.
+- Both participants can view the correct request status.
+- Invalid inputs return client errors, and the frontend displays the API error.
+- The application can be started and demonstrated locally.
+
+### Beta
+
+- A user can register, authenticate, sign out, and view/update permitted fields on their own profile.
+- A member cannot access or modify another member's protected resources.
+- A moderator can review reports and hide listings but cannot perform administrator-only user management.
+- An administrator can perform the defined platform management actions.
+- Tests verify allowed and denied actions for each role and scope.
+- Deployment uses HTTPS and does not expose secrets in the frontend bundle or API responses.
+
+## 6. Traceability
+
+| PRD goal / story | SRS requirements | Verification |
+|---|---|---|
+| G-1, US-1, US-2 | SRS-F01 to SRS-F02 | Listing API and UI tests |
+| G-2, US-3 | SRS-F03 to SRS-F06 | CRUD, validation, and ownership tests |
+| G-3, US-4 to US-6 | SRS-F07 to SRS-F12 | Request lifecycle and participant tests |
+| G-5, US-7 to US-8 | SRS-F13 to SRS-F16 | Authentication and profile tests |
+| G-6, G-7, US-9 to US-11 | SRS-F17 to SRS-F21 | Role/scope permission tests |
+| G-8 | SRS-NF07 to SRS-NF10 | Deployment and security checks |

@@ -1,150 +1,367 @@
-# Technical Design Document (TDD)
+# Technical Design Document (TDD) — SkillSwap
 
-## 1. Purpose and status
+| Field | Value |
+|---|---|
+| Product | SkillSwap |
+| Version | MVP + Beta |
+| Releases | MVP — Mid-term, Beta — Final |
+| Status | Draft |
+| Related docs | [Product Requirements Document (PRD)](PRD.md), [Software Requirements Specification (SRS)](SRS.md) |
 
-This document describes the current starter architecture and the proposed technical design for SkillSwap. The repository does not yet implement listing management, session requests, persistence, authentication, or authorization. Proposed components are design intent, not a claim about existing code.
+Sections and tables are marked **MVP** or **Beta**. Build the MVP for the mid-term; Beta extends it for the final. Design choices marked as open must be confirmed before implementation rather than assumed to exist.
 
-## 2. Constraints and technology
+**Documents in this set**
 
-| Area | Technology or status |
-| --- | --- |
-| Frontend | React, TypeScript, Vite |
-| Backend | FastAPI, Python |
-| API | JSON over REST |
-| Database | Not selected |
-| Deployment configuration | Vercel configuration is present; production deployment is planned for Beta |
+| Short form | Full form | Purpose | File |
+|---|---|---|---|
+| PRD | Product Requirements Document | What we build and why | [PRD.md](PRD.md) |
+| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria | [SRS.md](SRS.md) |
+| TDD | Technical Design Document | How we build it: architecture, data model, and API (this document) | [TDD.md](TDD.md) |
 
-The course requires React with TypeScript and FastAPI with Python. Implementation should remain small enough to demonstrate and test within the course schedule.
+## 1. Overview
+
+- **MVP:** Extend the existing React + TypeScript and FastAPI + Python starter into a local peer-learning application with persistent skill listings and session request workflows over REST.
+- **Beta:** Add accounts, profiles, member/moderator/administrator roles, backend permission scopes, moderation, administration, and deployment.
+- **Current status:** The repository currently has a hello/health FastAPI API, a frontend hello form, a Vite API proxy, and Vercel configuration. SkillSwap features and persistence are not yet implemented.
+
+## 2. Tech stack
+
+| Layer | Choice | Why | Release |
+|---|---|---|---|
+| API | FastAPI | Python REST API with request validation, type hints, and generated OpenAPI docs; already in the repository | MVP |
+| Frontend | Vite + React + TypeScript | Required course stack and already in the repository | MVP |
+| API format | JSON over REST | Simple interface between the web client and API | MVP |
+| Data validation | Pydantic through FastAPI | Validate payloads at the backend boundary | MVP |
+| Database | To be selected | Must support local development and persistent listings/requests; decide before implementing storage | MVP |
+| Persistence layer | To be selected with database | Keep database access behind a small repository/session boundary | MVP |
+| Hosting | Vercel configuration is present | Existing config describes separate frontend and backend services; verify compatibility before Beta deployment | Beta |
+| Password hashing | Maintained password-hashing library (choice pending) | Never store plaintext passwords | Beta |
+| Authentication | Token or secure-cookie design (choice pending) | Verify identity on protected API requests | Beta |
+
+Do not add a database, ORM, migration framework, or authentication library until the corresponding implementation decision is made and dependencies are reviewed.
 
 ## 3. Architecture
 
-### 3.1 Current starter architecture
-
-The Vite frontend runs independently during development and proxies `/api` calls to the FastAPI server. The backend currently exposes health and hello endpoints and can serve the built frontend when a `frontend/dist` directory exists. `vercel.json` describes frontend and backend services and routes API traffic to the backend.
-
-### 3.2 Target architecture
-
-```text
-Browser
-  |
-  | HTTPS / JSON REST
-  v
-React + TypeScript client
-  |
-  | /api requests
-  v
-FastAPI routers
-  |
-  +--> Request validation and Pydantic schemas
-  +--> Authentication and authorization dependencies (Beta)
-  +--> Service/business rules
-  |
-  v
-Persistence layer (MVP)
-  |
-  v
-Relational database (engine to be selected)
+```mermaid
+flowchart LR
+    Browser[Browser] -->|"/"| FE[React + TypeScript]
+    Browser -->|"/api/*"| API[FastAPI]
+    FE -->|fetch JSON| API
+    API -->|MVP persistence| DB[(Database to be selected)]
+    API -->|Beta| Auth[Authentication and authorization]
 ```
 
-Routers should handle HTTP concerns, schemas should validate request and response data, and service functions should enforce business rules. Database access should be isolated from route handlers so that ownership, state transitions, and authorization rules can be tested independently.
+In local development, Vite proxies `/api` to the FastAPI server, as configured in `frontend/vite.config.ts`. The existing Vercel configuration routes `/api/*` to the backend service and other paths to the frontend service. Keep API paths under `/api`.
 
-## 4. Backend design
+The target backend request flow is:
 
-### 4.1 Proposed module boundaries
+1. Router receives the HTTP request and validates its payload with a Pydantic schema.
+2. (Beta) Authentication dependency resolves the caller's identity from verified credentials.
+3. Authorization/business logic checks listing ownership, request participation, role, scope, and state transition.
+4. Persistence boundary reads or writes the records.
+5. Router returns a documented response schema and HTTP status.
 
-As features are implemented, organize the backend around focused modules:
+### 3.1 Request flow — MVP
 
-- `main.py`: application construction, router registration, health endpoint.
-- `routers/skills.py`: listing endpoints.
-- `routers/session_requests.py`: request endpoints and response actions.
-- `routers/auth.py` and `routers/users.py`: Beta authentication and profile endpoints.
-- `schemas/`: Pydantic input and output models.
-- `models/`: persisted entity definitions.
-- `services/`: listing, request, and account business rules.
-- `core/config.py` and `core/security.py`: Beta configuration, password hashing, and token/authentication helpers.
-- `db/`: connection/session lifecycle and migrations, after database selection.
+```mermaid
+sequenceDiagram
+    participant C as React client
+    participant R as FastAPI router
+    participant S as Validation and service logic
+    participant D as Persistence layer
+    C->>R: POST /api/skills {title, description, category}
+    R->>S: validate create payload
+    S-->>R: invalid / 422
+    S->>D: save listing
+    D-->>S: listing with identifier
+    S-->>R: listing
+    R-->>C: 201 Created + JSON
+```
 
-This is a target organization, not the current repository layout. Add modules only as their functionality is implemented.
+For MVP ownership-sensitive operations, use a controlled local/demo identity strategy. Do not accept arbitrary client-supplied owner IDs and describe them as secure authentication. Replace the demo identity boundary with verified account identity in Beta.
 
-### 4.2 API behavior
+### 3.2 Authentication and authorization flow — Beta
 
-- Use Pydantic request models for create/update payloads and validate all data on the server.
-- Return stable response schemas and appropriate HTTP status codes.
-- Return `404` when a requested record does not exist; use `403` for an authenticated caller who lacks permission, and `401` when authentication is required but missing or invalid.
-- Avoid returning password hashes, internal secrets, or unnecessary user data.
-- Document endpoints through FastAPI's generated OpenAPI documentation.
+```mermaid
+sequenceDiagram
+    participant C as React client
+    participant A as Auth/API router
+    participant P as Credential and permission dependencies
+    participant D as Persistence layer
+    C->>A: Sign in with credentials
+    A->>D: Find account
+    A->>P: Verify password and issue credentials
+    P-->>C: Authenticated session/token
+    C->>A: Protected request + credentials
+    A->>P: Verify identity, role, and scope
+    P-->>A: Authorized or 401/403
+    A->>D: Read/write permitted resource
+    D-->>A: Result
+    A-->>C: JSON response
+```
 
-### 4.3 Request state
+The credential transport, token/cookie settings, expiration, and refresh behavior remain an implementation decision. Choose and document them before Beta authentication work.
 
-Session requests begin in `pending` state. The listing owner can transition them to `accepted` or `declined`. The API must reject responses from anyone other than the listing owner and reject invalid or repeated terminal transitions unless a later product decision explicitly allows them.
+## 4. Project structure
 
-## 5. Frontend design
+The current repository is a small starter with `backend/main.py` and `frontend/src/App.tsx`. Introduce modules incrementally as features are implemented; the following is a proposed target, not the current file tree:
 
-The React client should keep route/page responsibilities separate from reusable form and listing components as the interface grows. API calls should be centralized behind small typed functions rather than duplicated through components.
+```text
+backend/
+  main.py
+  app/
+    config.py                  # environment-backed settings
+    routers/
+      skills.py                # MVP listing endpoints
+      session_requests.py      # MVP request workflow
+      auth.py                  # Beta account endpoints
+      users.py                 # Beta profile and admin endpoints
+    schemas/                   # Pydantic request/response models
+    services/                  # business rules and state transitions
+    models/                    # persisted entities
+    db/                        # database session and persistence setup
+frontend/
+  src/
+    api/                       # typed API calls
+    components/                # reusable forms and listing components
+    pages/                     # listing, requests, and Beta profile screens
+docs/
+  PRD.md
+  SRS.md
+  TDD.md
+```
 
-Planned views:
+## 5. Data model
 
-- **MVP:** listing browse, listing detail, listing create/edit form, participant request list, request response controls.
-- **Beta:** registration/sign-in, profile dashboard, role-appropriate moderation and administration views.
+### 5.1 Skill listing — MVP
 
-The client may improve usability by hiding unavailable controls, but must display backend errors and never be relied on for security decisions.
+| Field | Type / rule | Notes |
+|---|---|---|
+| `id` | Stable identifier, primary key | Generated by persistence layer |
+| `owner_id` | Required owner reference or controlled demo identity | Must not be treated as authenticated identity in MVP |
+| `title` | Required bounded string | Trim whitespace and reject empty value |
+| `description` | Required bounded text | Validate maximum size |
+| `category_id` | Category reference, if categories are part of the selected MVP scope | Category management is planned for Beta |
+| `is_available` | Boolean/status | Unavailable listings cannot receive new requests |
+| `created_at` | Timestamp | Set by backend |
+| `updated_at` | Timestamp | Updated by backend |
 
-## 6. Data design
+### 5.2 Session request — MVP
 
-The database engine remains undecided. Before implementing persistence, select a relational database and access/migration approach that work locally and with the intended deployment environment. Keep the model portable and avoid coupling business rules to database-specific behavior.
+| Field | Type / rule | Notes |
+|---|---|---|
+| `id` | Stable identifier, primary key | Generated by persistence layer |
+| `listing_id` | Required listing reference | Listing must exist and be available |
+| `learner_id` | Required participant identity | Derived from controlled MVP demo identity; authenticated in Beta |
+| `teacher_id` | Listing owner's identity | Derived from the referenced listing, not trusted from request body |
+| `message` | Optional or required bounded text | Final requirement to be decided during implementation |
+| `status` | `pending`, `accepted`, or `declined` | Starts as `pending`; owner responds |
+| `created_at`, `updated_at` | Timestamps | Set by backend |
 
-### 6.1 Proposed entities
+### 5.3 Full data model — Beta
 
-| Entity | Important relationships and fields |
-| --- | --- |
-| `User` (Beta) | Owns skill listings; can participate in requests; has unique email, password hash, role, and profile fields. |
-| `Category` | Groups skill listings; has a unique name. |
-| `SkillListing` | Belongs to an owner and category; has title, description, availability/visibility, timestamps. |
-| `SessionRequest` | References a listing, learner, and teacher/listing owner; has message, status, and timestamps. |
-| `Report` (Beta) | References a listing and reporter; records reason, review state, and moderator action. |
+| Entity | Key data and relationships | Release |
+|---|---|---|
+| `User` | Unique email, password hash, display name, role, profile data, timestamps | Beta |
+| `Category` | Unique name, description | Beta |
+| `SkillListing` | Owner, category, title, description, availability/visibility, timestamps | MVP/Beta |
+| `SessionRequest` | Listing, learner, teacher/listing owner, message, status, timestamps | MVP/Beta |
+| `Report` | Reporter, listing, reason, review state, moderator action, timestamps | Beta |
 
-Use stable identifiers, foreign keys, and database constraints for required values and unique account email. Consider indexes for listing category/availability and session-request participants/status. Determine cascade and archival behavior before migrations.
+Use foreign keys and database constraints for required references and unique account email. Consider indexes for listing availability/category and session request participants/status. Decide cascade, archival, and deletion behavior before writing migrations.
 
-## 7. Authentication and authorization (Beta)
+### 5.4 Schemas
 
-- Use a maintained password-hashing implementation; never store plaintext passwords.
-- Load signing keys and other secrets from environment configuration and validate required production settings at startup.
-- Choose and document a token or secure-cookie strategy before implementing authentication.
-- Derive identity and role from verified backend credentials, never from client-supplied role fields.
-- Enforce permissions through FastAPI dependencies or an equivalent centralized backend mechanism.
-- Apply ownership checks in service/API operations for listings and session requests.
-- Use least privilege: members manage their own resources, moderators handle reports/listing visibility, and administrators manage platform resources.
+Keep API schemas separate by operation where fields differ:
 
-Potential scopes include `skills:read`, `skills:create`, `skills:update:own`, `requests:create`, `requests:respond`, `reports:review`, and `users:manage`. Final scope names and the mapping from roles to scopes should be defined with implementation.
+- `SkillCreate` and `SkillUpdate`: accepted listing fields; do not accept arbitrary owner or moderation fields from the client.
+- `SkillRead`: public listing fields and appropriate timestamps; omit private account data.
+- `SessionRequestCreate`: listing identifier and request message/learning goal; derive teacher from listing.
+- `SessionRequestResponse`: only the permitted response status; enforce who may submit it in backend logic.
+- `SessionRequestRead`: participant-safe request details.
+- Beta account/profile schemas must never expose password hashes or credential secrets.
 
-## 8. Configuration and deployment
+## 6. REST API design
 
-Local development uses the Vite proxy to reach FastAPI. Continue to document backend and frontend setup separately. Keep secrets out of the repository and provide non-secret example configuration only if needed.
+All application routes use the `/api` prefix to match the Vite proxy and Vercel rewrite configuration. Final route names may change with implementation.
 
-For Beta deployment, configure the frontend and backend services using the existing Vercel setup or a reviewed alternative. Provide environment variables through the hosting platform, use HTTPS, and verify that the selected database is reachable and backed up. Deployment is a Beta requirement; the MVP demo must work locally.
+### 6.1 Endpoints — MVP
 
-## 9. Testing strategy
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| `GET` | `/api/skills` | Browse available listings | `200` |
+| `POST` | `/api/skills` | Create a listing | `201` |
+| `GET` | `/api/skills/{skill_id}` | Retrieve listing details | `200` |
+| `PATCH` | `/api/skills/{skill_id}` | Update an owned listing | `200` |
+| `DELETE` | `/api/skills/{skill_id}` | Delete an owned listing | `204` |
+| `POST` | `/api/session-requests` | Create a request for an available listing | `201` |
+| `GET` | `/api/session-requests` | List requests relevant to the caller | `200` |
+| `PATCH` | `/api/session-requests/{request_id}` | Accept or decline a pending request | `200` |
 
-### MVP
+The request-list endpoint must scope results to relevant participants. Since the MVP has no production authentication, its demo identity mechanism is an explicit limitation and must not be treated as a production access control.
 
-- Backend unit tests for listing validation and session-request state transitions.
-- API tests for listing CRUD, request creation/responding, status visibility, and ownership enforcement.
-- Frontend build/type-check and focused UI checks for forms, loading, and error states.
-- Manual end-to-end local demo using the documented startup steps.
+### 6.2 Endpoints — Beta
 
-### Beta
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | Register a new account | `201` |
+| `POST` | `/api/auth/token` | Authenticate and establish credentials | `200` |
+| `POST` | `/api/auth/logout` | Sign out/invalidate credentials, per selected design | `204` |
+| `GET` | `/api/users/me` | Retrieve the authenticated member's profile | `200` |
+| `PATCH` | `/api/users/me` | Update permitted profile fields | `200` |
+| `GET` | `/api/reports` | Review reports | `200`, moderator/admin |
+| `PATCH` | `/api/reports/{report_id}` | Resolve report and optionally hide listing | `200`, moderator/admin |
+| `GET` | `/api/admin/users` | List/manage user accounts | `200`, administrator |
+| `PATCH` | `/api/admin/users/{user_id}` | Update permitted user status/role | `200`, administrator |
+| `GET` | `/api/admin/categories` | Manage categories | `200`, administrator |
 
-- Authentication tests for registration, credential validation, and protected endpoints.
-- Authorization tests for member, moderator, and administrator access, including denied actions.
-- Tests ensuring users cannot access another user's profile or requests.
-- Production configuration/deployment smoke checks; verify secrets are not exposed in client bundles or responses.
+Beta endpoints require verified authentication and the applicable role/scope. Final route set should be limited to what is needed for the demo.
 
-Tests should use isolated test data and should not require live production credentials.
+### 6.3 Examples
 
-## 10. Risks and open decisions
+Create a listing:
 
-- **Database and migration tooling:** Select before building persistent features; confirm local and hosting compatibility.
-- **MVP identity:** Without authentication, the project needs a controlled demo strategy for resource ownership. Do not treat a client-provided owner identifier as secure.
-- **Authentication design:** Decide token versus secure cookie handling, expiration, and refresh behavior before Beta implementation.
-- **Scope feasibility:** Prioritize a complete listing/request flow over optional messaging, scheduling integrations, or other non-MVP features.
-- **Deployment configuration:** Validate the Vercel service configuration against the final backend/frontend build and database choice.
+```http
+POST /api/skills
+Content-Type: application/json
+
+{
+  "title": "Beginner guitar",
+  "description": "Learn basic chords and strumming patterns."
+}
+```
+
+Create a session request:
+
+```http
+POST /api/session-requests
+Content-Type: application/json
+
+{
+  "listing_id": 12,
+  "message": "I would like to learn the basic chords."
+}
+```
+
+Respond to a pending request:
+
+```http
+PATCH /api/session-requests/31
+Content-Type: application/json
+
+{
+  "status": "accepted"
+}
+```
+
+Examples are illustrative. Identifiers, exact required fields, and response schemas depend on the selected persistence design.
+
+### 6.4 Error format
+
+Use FastAPI validation errors for invalid request data and a consistent JSON shape for application errors:
+
+```json
+{
+  "detail": "The session request is no longer pending."
+}
+```
+
+Expected status codes include `401` for missing/invalid Beta credentials, `403` for a permission failure, `404` for a missing resource, `409` for a conflicting state transition or duplicate account, and `422` for invalid input. Do not return stack traces or secrets.
+
+### 6.5 Design rules
+
+- Validate all client input on the backend.
+- Do not trust client-submitted owner, learner, teacher, role, or scope values; derive them from server-side identity and resource relationships.
+- Return only fields appropriate to the caller.
+- Enforce request-state transitions and listing availability in backend business logic.
+- Use `404` for nonexistent resources and `403` for authenticated callers lacking permission, consistently.
+
+## 7. Database access
+
+Database engine, ORM, and migration tool are open decisions. Before implementation:
+
+1. Select a relational database that can be used locally and hosted for Beta.
+2. Select a persistence library compatible with FastAPI and the project scope.
+3. Define a repeatable schema creation/migration workflow.
+4. Use a per-request database session and ensure it is closed reliably.
+5. Keep commits/transactions in service or persistence boundaries, not scattered through UI-facing route code.
+
+MVP data must persist across API restarts to support a complete listing and request workflow.
+
+## 8. Configuration
+
+The existing starter does not yet define database or authentication settings. As those features are added:
+
+- Read deployment-specific configuration from environment variables.
+- Validate required settings at startup and fail clearly when production configuration is missing.
+- Keep `.env` files containing real secrets out of version control.
+- Provide safe local-development defaults only for non-secret configuration.
+- Beta settings may include database connection URL, credential signing secret, credential lifetimes, and allowed origins, depending on the final implementation.
+
+## 9. Deployment
+
+- **MVP:** run the frontend with Vite and the API with FastAPI locally. The Vite proxy forwards `/api` to the API.
+- **Beta:** verify the existing `vercel.json` frontend/backend service setup, configure the chosen database and secrets in the host, enable HTTPS, and perform a deployment smoke test.
+
+Do not claim the app is deployed until the full frontend, API, and selected database have been verified together.
+
+## 10. Auth and RBAC design — Beta
+
+### 10.1 Credentials
+
+Choose either a short-lived signed access token with an appropriately protected refresh mechanism or a secure server-managed session. Document credential storage, expiration, renewal, logout/revocation, and CSRF considerations before implementation. Do not store long-lived secrets in browser-accessible persistent storage without a reviewed security rationale.
+
+### 10.2 Passwords
+
+- Hash passwords with a maintained password-hashing library and a strong work factor.
+- Never log, return, or persist plaintext passwords.
+- Return generic authentication failures that do not disclose whether an email is registered.
+- Apply basic request throttling or login-attempt protections if feasible for Beta.
+
+### 10.3 Permission dependencies
+
+Enforce authorization centrally through FastAPI dependencies or an equivalent backend mechanism:
+
+| Scope example | Allowed operation | Roles |
+|---|---|---|
+| `skills:read` | Browse public listings | Public |
+| `skills:create` | Create a listing | Member, moderator, administrator |
+| `skills:update:own` | Update/delete own listing | Member, moderator, administrator |
+| `requests:create` | Create a session request | Member, moderator, administrator |
+| `requests:respond` | Respond to a request for own listing | Listing owner |
+| `reports:review` | Review reports and hide listings | Moderator, administrator |
+| `users:manage` | Manage user accounts | Administrator |
+
+Scope names and role-to-scope mapping are examples. The backend must also check resource ownership and participation; a scope alone is not sufficient.
+
+### 10.4 Moderator and administrator operations
+
+- A moderator may review reports and hide a listing; moderation actions should be recorded with actor and timestamp.
+- An administrator may manage users, categories, and platform listings.
+- Use least privilege and test denied operations as well as successful ones.
+- Keep administrative endpoints separate and require explicit administrator authorization.
+
+## 11. Security — Beta
+
+- Enforce authentication, ownership, and roles on every protected API request.
+- Validate and bound all user-provided fields.
+- Use HTTPS in production and secure credential transport/settings selected in the auth design.
+- Keep passwords hashed; keep signing/database secrets out of source control.
+- Prevent mass assignment by allowing only explicitly modeled update fields.
+- Avoid exposing private profile data or internal exception details.
+- Use secure CORS configuration appropriate to the deployed frontend origin.
+- Test access as visitor, member, moderator, and administrator, including attempts to access another user's resource.
+
+## 12. Migrations and data lifecycle
+
+The migration tool is not selected. Choose one when selecting the database and persistence library. Version schema changes, review upgrade behavior, and keep local setup reproducible. Define deletion/archival behavior for users, listings, requests, and reports before production deployment.
+
+## 13. Risks and open decisions
+
+| Risk / decision | Impact | Action |
+|---|---|---|
+| Database and ORM are undecided. | Blocks reliable persistent CRUD and deployment. | Choose local and hosting-compatible options before implementing storage. |
+| MVP has no real authentication. | Ownership-based features cannot be production-secure. | Limit the demo identity approach and replace it with verified identity in Beta. |
+| Authentication transport is undecided. | Affects frontend storage and backend security. | Select and document token or secure-session design before Beta auth. |
+| Course scope is limited. | Large optional features can prevent a complete demo. | Prioritize listings and the request lifecycle; leave integrations out of scope. |
+| Existing Vercel config has not been validated with a database. | Deployment may differ from local behavior. | Verify the complete hosted stack during Beta implementation. |

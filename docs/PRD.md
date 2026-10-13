@@ -1,111 +1,199 @@
-# Product Requirements Document (PRD)
+# Product Requirements Document (PRD) — SkillSwap
 
-## 1. Document purpose
+| Field | Value |
+|---|---|
+| Product | SkillSwap |
+| Version | MVP + Beta |
+| Releases | MVP — Mid-term, Beta — Final |
+| Status | Draft |
+| Related docs | [Software Requirements Specification (SRS)](SRS.md), [Technical Design Document (TDD)](TDD.md) |
 
-This document defines the product scope, users, and release requirements for SkillSwap. It is a planning document: the repository currently contains a React and TypeScript frontend starter and a FastAPI backend starter, not the SkillSwap features described here.
+This document covers **both releases**. Every goal, feature, and user story has a **Release** column so it is clear what is planned for the mid-term and what is added for the final.
 
-## 2. Product summary
+**Documents in this set**
 
-SkillSwap helps people learn from one another by letting members offer skills they can teach, find skills they want to learn, and coordinate peer-to-peer learning sessions.
+| Short form | Full form | Purpose | File |
+|---|---|---|---|
+| PRD | Product Requirements Document | What we build and why (this document) | [PRD.md](PRD.md) |
+| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria | [SRS.md](SRS.md) |
+| TDD | Technical Design Document | How we build it: architecture, data model, and API | [TDD.md](TDD.md) |
 
-### Problem
+## 0. Release plan
 
-People often have useful skills to share and subjects they want to learn, but lack a simple way to discover a suitable peer and arrange a learning session.
+| Release | When | Focus |
+|---|---|---|
+| **MVP** | Mid-term | Local peer-learning product: skill listing CRUD and session request workflow through REST APIs |
+| **Beta** | Final | Accounts, profiles, roles and scopes, moderation, administration, and deployment |
 
-### Product goals
+```mermaid
+flowchart LR
+    subgraph MVP["MVP — Mid-term"]
+        M1[Skill listings] --> M2[Session requests] --> M3[Local demo]
+    end
+    subgraph Beta["Beta — Final"]
+        B1[Authentication] --> B2[Profiles and RBAC] --> B3[Scopes and moderation] --> B4[Deployment]
+    end
+    M3 --> B1
+```
 
-- Make it easy to discover skills offered by other members.
-- Let members publish and maintain their own skill listings.
-- Provide a simple request-and-response workflow for learning sessions.
-- Demonstrate a working full-stack application using React, TypeScript, FastAPI, and REST APIs.
-- Add authentication and role-based access control in the Beta release.
+## 1. Purpose
 
-## 3. Users and roles
+SkillSwap is a peer-to-peer learning platform. Members can share skills they teach, discover skills they want to learn, and arrange learning sessions.
 
-| User | Needs |
-| --- | --- |
-| Visitor (MVP) | Browse public skill listings and view listing details. |
-| Member (MVP/Beta) | Offer skills, find skills to learn, manage their listings, and create or respond to session requests. A member may teach and learn. |
-| Moderator (Beta) | Review reports and hide inappropriate listings. |
-| Administrator (Beta) | Manage users, categories, and listings across the platform. |
+The project is delivered in two focused releases:
 
-In the MVP, authentication is out of scope. Ownership-sensitive operations may use a clearly identified development owner, but must not be presented as production-secure. Beta adds real accounts and server-enforced permissions.
+1. **MVP (mid-term):** a usable local application for browsing and managing skill listings and sending/responding to learning session requests.
+2. **Beta (final):** a secure multi-user application with authentication, member profiles, role-based permissions, moderator/admin capabilities, and deployment.
 
-## 4. Release scope
+The repository currently contains a React and TypeScript frontend starter and a FastAPI backend starter. The SkillSwap features in this document are planned, not yet implemented.
 
-### MVP — Mid-term demo
+## 2. Problem statement
 
-The MVP focuses on the core learning exchange and local demonstration:
+People have skills they can teach and subjects they want to learn, but they may not have a simple way to discover a suitable peer and coordinate a learning session. SkillSwap provides a lightweight directory of learning opportunities and a request workflow to connect learners and teachers.
 
-- Browse and view skill listings.
-- Create, update, and delete a member's own listings.
-- Send a session request for a listing.
+## 3. Goals
+
+| ID | Goal | Release |
+|---|---|---|
+| G-1 | Browse and view available skill listings through a clear interface and REST API. | MVP |
+| G-2 | Create, view, update, and delete skill listings. | MVP |
+| G-3 | Request a session and let the listing owner accept or decline it. | MVP |
+| G-4 | Run and demonstrate the frontend and backend locally. | MVP |
+| G-5 | Register, sign in, and provide a member profile dashboard. | Beta |
+| G-6 | Enforce member, moderator, and administrator permissions on the backend. | Beta |
+| G-7 | Restrict protected actions using authorization scopes. | Beta |
+| G-8 | Deploy the application with production configuration and security controls. | Beta |
+
+## 4. Target users
+
+| User | Need | Release |
+|---|---|---|
+| Visitor / learner | Browse skills and find a person to learn from. | MVP |
+| Skill teacher | Publish a skill listing and manage its details. | MVP |
+| Session participant | Send or respond to a request and see its status. | MVP |
+| Registered member | Sign in, manage their profile, and manage their own listings and requests. | Beta |
+| Moderator | Review reports and hide inappropriate listings. | Beta |
+| Administrator | Manage users, categories, and listings across the platform. | Beta |
+
+A member can both teach and learn. The MVP has no production authentication; any demo ownership mechanism must not be presented as secure account-based authorization. In Beta, identity and permissions are enforced by the backend.
+
+## 5. Scope
+
+### In scope — MVP (mid-term)
+
+- Browse available skill listings and view a listing's details.
+- Create, update, and delete skill listings.
+- Send a learning session request for an available listing.
 - Let the listing owner accept or decline a request.
-- Show request status to the involved participants.
-- Run the frontend and backend locally.
+- View request status and the requests relevant to a participant.
+- Validate submitted data and return useful API errors.
+- Run the complete frontend and backend locally.
 
-### Beta — Final demo
-
-The Beta builds on the MVP with secure accounts and deployment:
+### In scope — Beta (final)
 
 - Register, sign in, and sign out.
 - Provide a member profile dashboard.
-- Enforce member, moderator, and administrator permissions on the backend.
-- Restrict operations with authorization scopes.
+- Enforce listing ownership and request participation on the backend.
+- Apply roles and permission scopes for members, moderators, and administrators.
 - Let moderators review reports and hide inappropriate listings.
-- Let administrators manage users, categories, and listings.
-- Deploy the application.
+- Let administrators manage users, categories, and platform listings.
+- Deploy the application with secure configuration.
 
-## 5. Functional requirements
+### Out of scope for this semester
 
-| ID | Release | Requirement |
-| --- | --- | --- |
-| PRD-F01 | MVP | Visitors can browse available skill listings and view listing details. |
-| PRD-F02 | MVP | A member can create a listing describing a skill they can teach. |
-| PRD-F03 | MVP | A member can edit or delete only their own listings. |
-| PRD-F04 | MVP | A learner can request a session for an available listing. |
-| PRD-F05 | MVP | A listing owner can accept or decline an incoming request. |
-| PRD-F06 | MVP | Both participants can view the current status of their session requests. |
-| PRD-F07 | Beta | A user can register, authenticate, and access their own profile. |
-| PRD-F08 | Beta | The backend authorizes operations according to member, moderator, or administrator role and required permission scope. |
-| PRD-F09 | Beta | A moderator can review reports and hide inappropriate listings. |
-| PRD-F10 | Beta | An administrator can manage users, categories, and listings across the platform. |
-| PRD-F11 | Beta | Members can view and update appropriate profile information in a dashboard. |
+- Payments, paid lessons, or monetization.
+- Built-in video conferencing or real-time chat.
+- Calendar integrations and automated scheduling.
+- Mobile applications or advanced skill recommendations.
+- Complex review, ranking, or reputation systems.
 
-## 6. Non-functional requirements
+## 6. Features and priority (MoSCoW)
 
-| ID | Release | Requirement |
-| --- | --- | --- |
-| PRD-NF01 | MVP | The application can be started locally with separate frontend and backend development servers. |
-| PRD-NF02 | MVP | API requests use JSON and return appropriate HTTP status codes for success and validation errors. |
-| PRD-NF03 | MVP | User-provided values are validated by the backend before persistence. |
-| PRD-NF04 | Beta | Authorization is enforced by the API and cannot be bypassed by changing frontend state or calling endpoints directly. |
-| PRD-NF05 | Beta | Passwords are stored using a recognized password-hashing algorithm; plaintext passwords are never stored. |
-| PRD-NF06 | Beta | Secrets and deployment-specific settings are supplied through environment configuration, not committed to source control. |
-| PRD-NF07 | Beta | Errors do not expose passwords, tokens, secret configuration, or unnecessary personal data. |
+| Priority | Feature | Release |
+|---|---|---|
+| Must | Browse and view skill listings. | MVP |
+| Must | Create, update, and delete skill listings. | MVP |
+| Must | Create session requests and accept or decline them. | MVP |
+| Must | Display the status of a participant's session requests. | MVP |
+| Must | Register and authenticate members. | Beta |
+| Must | Enforce ownership and role/scope authorization on the backend. | Beta |
+| Must | Provide member profile access. | Beta |
+| Should | Review reports and hide inappropriate listings. | Beta |
+| Should | Manage users and categories as an administrator. | Beta |
+| Should | Deploy the application for the final demo. | Beta |
+| Could | Add filters for category or skill keywords. | Later, if time permits |
+| Won't | Add payments, chat, video, or calendar integration. | Out of scope |
 
-## 7. Success criteria
+## 7. User stories
 
-### MVP demo
+### MVP
 
-- A user can browse listings, create and manage a listing, submit a session request, and see a response and request status.
-- The frontend communicates with the FastAPI backend through documented REST endpoints.
-- The complete demo can be run locally using the repository instructions.
+| ID | User story | Release |
+|---|---|---|
+| US-1 | As a learner, I want to browse available skills so that I can find something to learn. | MVP |
+| US-2 | As a learner, I want to view a listing's details so that I can decide whether to contact the teacher. | MVP |
+| US-3 | As a teacher, I want to create and maintain a skill listing so that learners can discover what I can teach. | MVP |
+| US-4 | As a learner, I want to request a session so that I can ask the teacher to arrange a learning exchange. | MVP |
+| US-5 | As a teacher, I want to accept or decline a request so that the learner knows my response. | MVP |
+| US-6 | As a participant, I want to see request status so that I know whether the request is pending, accepted, or declined. | MVP |
 
-### Beta demo
+### Beta
 
-- A user can register and sign in, and access a profile dashboard.
-- Attempts to perform an unauthorized action are rejected by the backend.
-- Moderator and administrator capabilities are limited to their defined responsibilities.
-- The deployed application works without exposing credentials or relying on frontend-only authorization.
+| ID | User story | Release |
+|---|---|---|
+| US-7 | As a visitor, I want to register and sign in so that my listings and requests are associated with my account. | Beta |
+| US-8 | As a member, I want to view and update my profile so that my account information stays current. | Beta |
+| US-9 | As a member, I want the backend to protect my listings and requests so that other users cannot act as me. | Beta |
+| US-10 | As a moderator, I want to review reports and hide inappropriate listings so that the community remains useful. | Beta |
+| US-11 | As an administrator, I want to manage users, categories, and listings so that I can administer the platform. | Beta |
 
-## 8. Out of scope
+## 8. Success metrics
 
-To keep the course project achievable, the initial releases do not include payments, video conferencing, a real-time chat system, mobile applications, calendar synchronization, or advanced recommendation algorithms.
+### MVP
 
-## 9. Assumptions and risks
+- A reviewer can browse listings, view details, and complete listing CRUD using the application.
+- A learner can submit a request and the teacher can accept or decline it.
+- Both participants can see the resulting request status.
+- The demo runs locally using the repository's documented setup.
 
-- Members are allowed to both teach and learn.
-- Session coordination initially consists of a request and an accept/decline response; scheduling and communication can be handled outside the app.
-- The database has not yet been selected. Persistence and deployment requirements should guide that decision before feature implementation.
-- The MVP has no production authentication, so ownership enforcement for a classroom demo must not be represented as secure account-based access control.
+### Beta
+
+- A member can register, sign in, and access their profile.
+- Backend tests demonstrate that unauthorized listing, request, moderation, and administration actions are rejected.
+- Moderator and administrator capabilities match their assigned roles and scopes.
+- The deployed application works without exposing secrets or relying on frontend-only authorization.
+
+## 9. Assumptions and constraints
+
+- The required stack is React with TypeScript and FastAPI with Python.
+- Members can both teach and learn.
+- Session coordination initially consists of a request and an accept/decline response; scheduling and communication can happen outside the application.
+- The database engine has not been selected. Persistent storage is needed for a complete listing/request workflow; select a database compatible with local development and the eventual hosting plan.
+- Authentication is not part of the MVP. Do not treat client-provided identity as a secure ownership check.
+- The existing Vercel configuration is present, but deployment is planned for Beta and is not required for the MVP.
+- The project scope should favor a small complete experience over optional integrations.
+
+## 10. Milestones
+
+### MVP — Mid-term
+
+1. Confirm the data model and choose the database approach.
+2. Implement skill listing persistence and CRUD API.
+3. Implement session request creation, response, and status API.
+4. Connect React views and forms to the API.
+5. Verify validation, ownership behavior for the demo, and local setup.
+
+### Beta — Final
+
+1. Add account registration, authentication, and profile management.
+2. Add backend authorization for member ownership and role/scope permissions.
+3. Add moderator reporting and administrator management functions.
+4. Add security and authorization tests.
+5. Configure and verify deployment.
+
+## 11. Release dependencies
+
+- Session requests depend on persisted skill listings and an identifiable listing owner. (MVP)
+- Secure ownership checks depend on authenticated user identity. (Beta)
+- Moderator and administrator features depend on roles/scopes and report/listing data. (Beta)
+- Deployment depends on selecting a compatible persistence solution and configuring secrets outside source control. (Beta)
