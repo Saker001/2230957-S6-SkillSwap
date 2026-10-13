@@ -51,6 +51,12 @@ The starter application currently includes:
 
 Skill listings, session requests, user accounts, authentication, authorization, persistence, and the planned roles are not implemented yet. The database technology has not been selected.
 
+## Project documentation
+
+- [Product Requirements Document (PRD)](docs/PRD.md) — product goals, users, release scope, and success criteria.
+- [Software Requirements Specification (SRS)](docs/SRS.md) — functional, non-functional, and interface requirements.
+- [Technical Design Document (TDD)](docs/TDD.md) — current architecture and proposed implementation design.
+
 ## Technology stack
 
 - **Frontend:** React, TypeScript, Vite
