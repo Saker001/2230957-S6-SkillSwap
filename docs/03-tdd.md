@@ -6,7 +6,7 @@
 | Version | MVP + Beta |
 | Releases | MVP — Mid-term, Beta — Final |
 | Status | Draft |
-| Related docs | [Product Requirements Document (PRD)](PRD.md), [Software Requirements Specification (SRS)](SRS.md) |
+| Related docs | [Product Requirements Document (PRD)](01-prd.md), [Software Requirements Specification (SRS)](02-srs.md) |
 
 Sections and tables are marked **MVP** or **Beta**. Build the MVP for the mid-term; Beta extends it for the final. Design choices marked as open must be confirmed before implementation rather than assumed to exist.
 
@@ -14,9 +14,9 @@ Sections and tables are marked **MVP** or **Beta**. Build the MVP for the mid-te
 
 | Short form | Full form | Purpose | File |
 |---|---|---|---|
-| PRD | Product Requirements Document | What we build and why | [PRD.md](PRD.md) |
-| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria | [SRS.md](SRS.md) |
-| TDD | Technical Design Document | How we build it: architecture, data model, and API (this document) | [TDD.md](TDD.md) |
+| PRD | Product Requirements Document | What we build and why | [01-prd.md](01-prd.md) |
+| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria | [02-srs.md](02-srs.md) |
+| TDD | Technical Design Document | How we build it: architecture, data model, and API (this document) | [03-tdd.md](03-tdd.md) |
 
 ## 1. Overview
 
@@ -126,9 +126,9 @@ frontend/
     components/                # reusable forms and listing components
     pages/                     # listing, requests, and Beta profile screens
 docs/
-  PRD.md
-  SRS.md
-  TDD.md
+  01-prd.md
+  02-srs.md
+  03-tdd.md
 ```
 
 ## 5. Data model

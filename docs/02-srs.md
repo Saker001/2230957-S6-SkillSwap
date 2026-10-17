@@ -6,7 +6,7 @@
 | Version | MVP + Beta |
 | Releases | MVP — Mid-term, Beta — Final |
 | Status | Draft |
-| Related docs | [Product Requirements Document (PRD)](PRD.md), [Technical Design Document (TDD)](TDD.md) |
+| Related docs | [Product Requirements Document (PRD)](01-prd.md), [Technical Design Document (TDD)](03-tdd.md) |
 
 Every requirement has a **Release** column or label: **MVP** is built for the mid-term; **Beta** extends it for the final.
 
@@ -14,9 +14,9 @@ Every requirement has a **Release** column or label: **MVP** is built for the mi
 
 | Short form | Full form | Purpose | File |
 |---|---|---|---|
-| PRD | Product Requirements Document | What we build and why | [PRD.md](PRD.md) |
-| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria (this document) | [SRS.md](SRS.md) |
-| TDD | Technical Design Document | How we build it: architecture, data model, and API | [TDD.md](TDD.md) |
+| PRD | Product Requirements Document | What we build and why | [01-prd.md](01-prd.md) |
+| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria (this document) | [02-srs.md](02-srs.md) |
+| TDD | Technical Design Document | How we build it: architecture, data model, and API | [03-tdd.md](03-tdd.md) |
 
 ## 1. Introduction
 
@@ -29,7 +29,7 @@ This document specifies SkillSwap's externally observable requirements for the M
 - **MVP:** users browse and manage skill listings and use a REST API to request and respond to learning sessions. The application runs locally.
 - **Beta:** registered members use profiles and authenticated APIs; member, moderator, and administrator actions are authorized on the backend.
 - The system uses a React + TypeScript frontend and FastAPI + Python backend.
-- Out of scope: payments, real-time chat/video, mobile applications, and calendar integrations. See [PRD, section 5](PRD.md#5-scope).
+- Out of scope: payments, real-time chat/video, mobile applications, and calendar integrations. See [PRD, section 5](01-prd.md#5-scope).
 
 ### 1.3 Definitions
 
