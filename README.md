@@ -53,9 +53,9 @@ Skill listings, session requests, user accounts, authentication, authorization, 
 
 ## Project documentation
 
-- [Product Requirements Document (PRD)](docs/PRD.md) — product goals, users, release scope, and success criteria.
-- [Software Requirements Specification (SRS)](docs/SRS.md) — functional, non-functional, and interface requirements.
-- [Technical Design Document (TDD)](docs/TDD.md) — current architecture and proposed implementation design.
+- [Product Requirements Document (PRD)](docs/01-prd.md) — product goals, users, release scope, and success criteria.
+- [Software Requirements Specification (SRS)](docs/02-srs.md) — functional, non-functional, and interface requirements.
+- [Technical Design Document (TDD)](docs/03-tdd.md) — current architecture and proposed implementation design.
 
 ## Technology stack
 

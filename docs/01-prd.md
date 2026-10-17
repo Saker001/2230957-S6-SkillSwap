@@ -6,7 +6,7 @@
 | Version | MVP + Beta |
 | Releases | MVP — Mid-term, Beta — Final |
 | Status | Draft |
-| Related docs | [Software Requirements Specification (SRS)](SRS.md), [Technical Design Document (TDD)](TDD.md) |
+| Related docs | [Software Requirements Specification (SRS)](02-srs.md), [Technical Design Document (TDD)](03-tdd.md) |
 
 This document covers **both releases**. Every goal, feature, and user story has a **Release** column so it is clear what is planned for the mid-term and what is added for the final.
 
@@ -14,9 +14,9 @@ This document covers **both releases**. Every goal, feature, and user story has 
 
 | Short form | Full form | Purpose | File |
 |---|---|---|---|
-| PRD | Product Requirements Document | What we build and why (this document) | [PRD.md](PRD.md) |
-| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria | [SRS.md](SRS.md) |
-| TDD | Technical Design Document | How we build it: architecture, data model, and API | [TDD.md](TDD.md) |
+| PRD | Product Requirements Document | What we build and why (this document) | [01-prd.md](01-prd.md) |
+| SRS | Software Requirements Specification | Exact requirements, permissions, and acceptance criteria | [02-srs.md](02-srs.md) |
+| TDD | Technical Design Document | How we build it: architecture, data model, and API | [03-tdd.md](03-tdd.md) |
 
 ## 0. Release plan
 
