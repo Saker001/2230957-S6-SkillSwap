@@ -2,7 +2,7 @@
 
 SkillSwap is a peer-to-peer learning platform where members can share skills they teach, find skills they want to learn, and arrange learning sessions.
 
-> **Project status:** In development. The repository currently contains a React and FastAPI starter application; the SkillSwap features below are planned and are not yet implemented.
+> **Project status:** MVP CRUD for skill listings and session requests is implemented. Authentication, RBAC, and Beta features remain planned.
 
 ## Project goals
 
@@ -16,8 +16,8 @@ SkillSwap is a peer-to-peer learning platform where members can share skills the
 ### MVP — Mid-term demo
 
 - Browse available skill listings.
-- Create, view, edit, and delete your own listings.
-- Send and respond to session requests.
+- Create, view, edit, and delete skill listings.
+- Create, view, edit, and delete session requests.
 - View request status.
 - Run the frontend and backend locally.
 
@@ -33,7 +33,7 @@ SkillSwap is a peer-to-peer learning platform where members can share skills the
 
 | Role | Main permissions |
 | --- | --- |
-| **Member** | Browse listings, manage their own listings, and create or respond to session requests. Members can both teach and learn. |
+| **Member** | Browse listings, manage their own listings, and create or respond to session requests. Members can both teach and learn. (Beta permissions) |
 | **Moderator** | Review reports and hide inappropriate listings. |
 | **Administrator** | Manage users, categories, and listings across the platform. |
 
@@ -41,15 +41,16 @@ Authorization must be enforced by the backend. For example, members may manage o
 
 ## Current implementation
 
-The starter application currently includes:
+The MVP currently includes:
 
-- A FastAPI backend with `GET /api/health` and `GET /api/hello`.
-- A React and TypeScript frontend with a form that calls `/api/hello`.
+- Skill listing CRUD in the React frontend and FastAPI REST API.
+- Session request CRUD in the React frontend and FastAPI REST API.
+- SQLModel persistence using SQLite by default, with PostgreSQL support through `DATABASE_URL`.
 - A Vite development proxy that forwards `/api` requests to the local backend.
-- FastAPI's interactive API documentation at `/docs`.
+- FastAPI's interactive API documentation at `/api/docs`.
 - A Vercel configuration for the frontend and backend services.
 
-Skill listings, session requests, user accounts, authentication, authorization, persistence, and the planned roles are not implemented yet. The database technology has not been selected.
+Authentication, authorization, member profiles, moderation, and administration are planned for Beta. The MVP has no sign-in, so listing and request data is shared and the frontend does not enforce ownership.
 
 ## Project documentation
 
@@ -63,23 +64,24 @@ Skill listings, session requests, user accounts, authentication, authorization, 
 - **Backend:** FastAPI, Python
 - **Communication:** REST APIs
 - **Authentication and authorization:** Planned
-- **Database:** To be selected
+- **Database:** SQLite locally; PostgreSQL when configured through `DATABASE_URL`
 
-## Planned API
+## MVP API
 
-These routes describe the intended API and may change during implementation.
+These routes are implemented by the current MVP.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/skills` | Browse skill listings |
 | `POST` | `/api/skills` | Create a skill listing |
 | `GET` | `/api/skills/{skill_id}` | View a listing |
-| `PATCH` | `/api/skills/{skill_id}` | Update an owned listing |
-| `DELETE` | `/api/skills/{skill_id}` | Delete an owned listing |
+| `PATCH` | `/api/skills/{skill_id}` | Update a listing |
+| `DELETE` | `/api/skills/{skill_id}` | Delete a listing |
 | `POST` | `/api/session-requests` | Request a learning session |
-| `GET` | `/api/session-requests` | View requests available to the signed-in member |
-| `PATCH` | `/api/session-requests/{request_id}` | Respond to or update a request |
-| `GET` | `/api/users/me` | View the signed-in member's profile |
+| `GET` | `/api/session-requests` | List session requests |
+| `GET` | `/api/session-requests/{request_id}` | View one session request |
+| `PATCH` | `/api/session-requests/{request_id}` | Update a request or its status |
+| `DELETE` | `/api/session-requests/{request_id}` | Delete a session request |
 
 ## Authorization scope examples
 
@@ -104,7 +106,7 @@ These are examples; final scope names should match the authorization implementat
 
 ### Start the backend
 
-From the repository root, create a virtual environment and install the backend dependencies.
+From the repository root, create a virtual environment and install the backend dependencies. SQLite is used by default and the database file is created at `backend/skillswap.db`.
 
 **Windows PowerShell:**
 
@@ -126,7 +128,13 @@ python -m pip install -r requirements.txt
 fastapi dev main.py
 ```
 
-The API runs at `http://localhost:8000`; interactive documentation is at `http://localhost:8000/docs`.
+The API runs at `http://localhost:8000`; interactive documentation is at `http://localhost:8000/api/docs`.
+
+To use PostgreSQL locally, set `DATABASE_URL` before starting FastAPI. Use the connection string from your database provider and keep it out of source control.
+
+```powershell
+$env:DATABASE_URL = "postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
+```
 
 ### Start the frontend
 
@@ -140,13 +148,23 @@ npm run dev
 
 Open the local address printed by Vite (typically `http://localhost:5173`). The Vite development server forwards `/api` requests to the backend on port `8000`.
 
+PostgreSQL support is available for a hosted database. Add `DATABASE_URL` to the backend service's production environment configuration before deployment; do not commit credentials.
+
+### Backend API tests
+
+From `backend/`, run:
+
+```powershell
+python -m unittest discover -s tests
+```
+
 ## Deployment
 
-The repository includes a `vercel.json` configuration for deploying the frontend and backend as Vercel services. To deploy, import the repository in Vercel and follow the project's deployment setup. Configure deployment settings and environment variables in the Vercel project before enabling production use.
+The repository includes a `vercel.json` configuration for deploying the frontend and backend as Vercel services. Configure `DATABASE_URL` in the backend service with a PostgreSQL connection string before deploying; Vercel's local filesystem is not persistent storage. Keep the connection string in Vercel environment settings, never in source control.
 
 ## Configuration and security
 
-The application does not yet implement authentication, authorization, or database configuration. As those features are added:
+The MVP does not yet implement authentication or authorization. Its listing and request data is shared; do not use it to store private or sensitive information. As Beta security features are added:
 
 - Keep secrets out of source control and load them from environment variables (for example, `DATABASE_URL`, `JWT_SECRET_KEY`, and `CORS_ORIGINS`).
 - Validate required configuration when the backend starts.

@@ -26,7 +26,7 @@ This document specifies SkillSwap's externally observable requirements for the M
 
 ### 1.2 Scope
 
-- **MVP:** users browse and manage skill listings and use a REST API to request and respond to learning sessions. The application runs locally.
+- **MVP:** users perform full CRUD on skill listings and session requests through the React UI and REST APIs. The application runs locally with persistent storage.
 - **Beta:** registered members use profiles and authenticated APIs; member, moderator, and administrator actions are authorized on the backend.
 - The system uses a React + TypeScript frontend and FastAPI + Python backend.
 - Out of scope: payments, real-time chat/video, mobile applications, and calendar integrations. See [PRD, section 5](01-prd.md#5-scope).
@@ -37,7 +37,7 @@ This document specifies SkillSwap's externally observable requirements for the M
 |---|---|
 | Skill listing | A member-authored description of a skill they can teach. |
 | Session request | A learner's request to arrange a learning session for a skill listing. |
-| Listing owner | The member who created a skill listing and can respond to requests for it. |
+| Listing owner | In Beta, the authenticated member who created a listing and can respond to its requests. |
 | CRUD | Create, Read, Update, Delete |
 | REST | API style that uses resources and HTTP methods such as GET, POST, PATCH, and DELETE. |
 | RBAC | Role-Based Access Control: access is granted according to a user's role. |
@@ -52,18 +52,18 @@ This document specifies SkillSwap's externally observable requirements for the M
 ```mermaid
 flowchart LR
     Client[Browser / React and TypeScript] -->|JSON REST| API[FastAPI backend]
-    API -->|MVP persistence| DB[(Database to be selected)]
+    API -->|SQLite local / PostgreSQL hosted| DB[(SQL database)]
     API -->|Beta identity and authorization| Auth[Account and permission services]
 ```
 
-The repository currently provides a React starter, a FastAPI health/hello API, a Vite proxy, and Vercel configuration. The requirements below describe planned SkillSwap behavior; the listing, request, persistence, and account features are not implemented yet.
+The MVP provides listing and session-request CRUD through the React frontend and FastAPI API. SQLite is the local default, and PostgreSQL can be selected with `DATABASE_URL`. Authentication, profiles, roles, and Beta permissions are not implemented.
 
 ### 2.2 Users and roles
 
 | User class / role | Release | Description |
 |---|---|---|
 | Visitor | MVP | Browses public skill listings and views listing details. |
-| Member | MVP/Beta | Can teach and learn, manage own listings, and participate in relevant requests. MVP identity is a demo concern; Beta identity is authenticated. |
+| Member | MVP/Beta | Can teach and learn. MVP data is shared without sign-in; Beta members have authenticated accounts and ownership checks. |
 | Moderator | Beta | Reviews reports and hides inappropriate listings. |
 | Administrator | Beta | Manages users, categories, and listings across the platform. |
 
@@ -80,16 +80,20 @@ flowchart LR
         UC2([View listing])
         UC3([Create or manage listing])
         UC4([Request learning session])
-        UC5([Accept or decline request])
-        UC6([View request status])
+        UC5([Update request])
+        UC6([Delete request])
+        UC7([View request status])
     end
     Learner --- UC1
     Learner --- UC2
     Teacher --- UC3
     Learner --- UC4
+    Learner --- UC5
     Teacher --- UC5
     Learner --- UC6
     Teacher --- UC6
+    Learner --- UC7
+    Teacher --- UC7
 ```
 
 **Beta**
@@ -117,15 +121,15 @@ flowchart LR
 
 - The frontend shall use React and TypeScript; the backend shall use FastAPI and Python.
 - The frontend and backend communicate through JSON REST APIs.
-- The database is not yet selected. The design must support local development and persistence across restarts.
+- Local development uses SQLite; PostgreSQL is supported through `DATABASE_URL` for hosted persistence.
 - The MVP must be demonstrable locally. Deployment is planned for Beta.
-- Authentication is not implemented in the current starter and is a Beta feature.
+- Authentication is intentionally deferred to Beta.
 
 ### 2.5 Assumptions
 
 - A member may be both a teacher and a learner.
-- A request initially represents an interest in a listing; time coordination can happen outside the application.
-- The listing owner is the teacher for a request created against that listing.
+- A request represents interest in a listing; time coordination can happen outside the application.
+- The MVP is a shared demonstration with no authenticated owner or participant checks.
 - Production ownership and role checks require authenticated identity and must be enforced by the backend.
 
 ## 3. Functional requirements
@@ -136,21 +140,22 @@ flowchart LR
 |---|---|
 | SRS-F01 | The API shall return available skill listings. |
 | SRS-F02 | A client shall be able to retrieve an individual listing by its identifier. |
-| SRS-F03 | A member shall be able to create a listing with valid required fields. |
-| SRS-F04 | A member shall be able to update or delete only their own listing. |
+| SRS-F03 | A client shall be able to create a listing with teacher name, title, description, and category. |
+| SRS-F04 | A client shall be able to update or delete a listing in the shared MVP demonstration. |
 | SRS-F05 | The API shall validate listing data and reject invalid payloads with an appropriate client-error response. |
-| SRS-F06 | A listing that is hidden or unavailable shall not be offered for a new session request. |
+| SRS-F06 | The API shall return `404` for an unknown listing identifier. |
 
 ### 3.2 Session requests — MVP
 
 | ID | Requirement |
 |---|---|
-| SRS-F07 | A learner shall be able to create a request for an available listing. |
-| SRS-F08 | A request shall identify its listing, learner, listing owner, message/learning goal, status, and timestamps. |
-| SRS-F09 | A request shall begin in `pending` status. |
-| SRS-F10 | The listing owner shall be able to accept or decline a pending request. |
-| SRS-F11 | A participant shall be able to view only requests in which they are involved. |
-| SRS-F12 | The API shall reject responses by a caller who is not the listing owner and reject invalid terminal status transitions. |
+| SRS-F07 | A client shall be able to create a request for an existing skill listing. |
+| SRS-F08 | A request shall store its listing, learner name, message, status, and creation timestamp. |
+| SRS-F09 | A new request shall begin in `pending` status. |
+| SRS-F10 | A client shall be able to update a request's listing, learner name, message, or status. |
+| SRS-F11 | A client shall be able to delete a session request. |
+| SRS-F12 | A client shall be able to list all MVP requests and retrieve one request by identifier. |
+| SRS-F12a | The API shall reject unknown listing/request identifiers and statuses outside `pending`, `accepted`, and `declined`. |
 
 ### 3.3 Authentication and profile — Beta
 
@@ -177,9 +182,9 @@ flowchart LR
 |---|---|---|
 | Skill title | Required, non-empty after trimming, and within a documented maximum length. | MVP |
 | Skill description | Required and within a documented maximum length. | MVP |
-| Category | Must refer to a valid category when categories are enabled. | MVP/Beta |
-| Request listing | Must reference an existing available listing. | MVP |
-| Request status | Must be one of `pending`, `accepted`, or `declined`; only the listing owner may respond. | MVP |
+| Category | Required non-empty text in the MVP; a managed category identifier may be introduced in Beta. | MVP/Beta |
+| Request listing | Must reference an existing skill listing. | MVP |
+| Request status | Must be one of `pending`, `accepted`, or `declined`. | MVP |
 | Account email | Required and unique; normalize and validate before account creation. | Beta |
 | Password | Must satisfy documented minimum policy and be stored only as a password hash. | Beta |
 
@@ -190,13 +195,13 @@ Exact maximum lengths and password policy shall be defined with implementation a
 ```mermaid
 stateDiagram-v2
     [*] --> pending
-    pending --> accepted: listing owner accepts
-    pending --> declined: listing owner declines
+    pending --> accepted: request status updated
+    pending --> declined: request status updated
     accepted --> [*]
     declined --> [*]
 ```
 
-The MVP does not include rescheduling, cancellation, or reopening terminal requests.
+The MVP does not include scheduling. Request statuses can be edited as part of the shared demonstration; there is no authentication or ownership enforcement yet.
 
 ### 3.7 Permission matrix — Beta
 
@@ -240,17 +245,17 @@ All permissions in this matrix are enforced by the backend in Beta. The MVP does
 | SRS-NF07 | Secrets shall be supplied via environment configuration or a managed secret store, not committed to source control. | Beta |
 | SRS-NF08 | Errors shall not reveal passwords, tokens, secret configuration, or internal stack traces. | Beta |
 | SRS-NF09 | Production traffic shall use HTTPS and secure credential handling for the selected authentication design. | Beta |
-| SRS-NF10 | Automated tests shall cover validation, ownership, request participation, and role/scope authorization. | Beta |
+| SRS-NF10 | Automated tests shall cover MVP CRUD, validation, persistence, and Beta role/scope authorization. | MVP/Beta |
 
 ## 5. Acceptance criteria
 
 ### MVP
 
 - A visitor can browse available listings and view a listing detail.
-- A member can create, update, and delete a listing; an attempt to modify a listing they do not own is rejected by the API's demo ownership strategy.
-- A learner can create a request for an available listing.
-- The listing owner can accept or decline the pending request; unrelated users cannot respond.
-- Both participants can view the correct request status.
+- A user can create, list, read a single, update, and delete skill listings in the UI.
+- A user can create, list, read a single, update, and delete session requests in the UI.
+- Session requests must refer to an existing skill listing; deleting a listing deletes its related requests.
+- SQLite data survives API restarts.
 - Invalid inputs return client errors, and the frontend displays the API error.
 - The application can be started and demonstrated locally.
 
@@ -269,7 +274,7 @@ All permissions in this matrix are enforced by the backend in Beta. The MVP does
 |---|---|---|
 | G-1, US-1, US-2 | SRS-F01 to SRS-F02 | Listing API and UI tests |
 | G-2, US-3 | SRS-F03 to SRS-F06 | CRUD, validation, and ownership tests |
-| G-3, US-4 to US-6 | SRS-F07 to SRS-F12 | Request lifecycle and participant tests |
+| G-3, US-4 to US-6 | SRS-F07 to SRS-F12a | Request CRUD, validation, and persistence tests |
 | G-5, US-7 to US-8 | SRS-F13 to SRS-F16 | Authentication and profile tests |
 | G-6, G-7, US-9 to US-11 | SRS-F17 to SRS-F21 | Role/scope permission tests |
 | G-8 | SRS-NF07 to SRS-NF10 | Deployment and security checks |

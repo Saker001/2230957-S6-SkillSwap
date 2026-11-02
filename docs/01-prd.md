@@ -22,7 +22,7 @@ This document covers **both releases**. Every goal, feature, and user story has 
 
 | Release | When | Focus |
 |---|---|---|
-| **MVP** | Mid-term | Local peer-learning product: skill listing CRUD and session request workflow through REST APIs |
+| **MVP** | Mid-term | Peer-learning product: full skill listing and session request CRUD through REST APIs, with persistent storage |
 | **Beta** | Final | Accounts, profiles, roles and scopes, moderation, administration, and deployment |
 
 ```mermaid
@@ -45,7 +45,7 @@ The project is delivered in two focused releases:
 1. **MVP (mid-term):** a usable local application for browsing and managing skill listings and sending/responding to learning session requests.
 2. **Beta (final):** a secure multi-user application with authentication, member profiles, role-based permissions, moderator/admin capabilities, and deployment.
 
-The repository currently contains a React and TypeScript frontend starter and a FastAPI backend starter. The SkillSwap features in this document are planned, not yet implemented.
+The MVP now implements skill listing and session request CRUD in the React frontend and FastAPI backend. Beta features in this document remain planned.
 
 ## 2. Problem statement
 
@@ -57,7 +57,7 @@ People have skills they can teach and subjects they want to learn, but they may 
 |---|---|---|
 | G-1 | Browse and view available skill listings through a clear interface and REST API. | MVP |
 | G-2 | Create, view, update, and delete skill listings. | MVP |
-| G-3 | Request a session and let the listing owner accept or decline it. | MVP |
+| G-3 | Create, view, update, and delete session requests; track request status. | MVP |
 | G-4 | Run and demonstrate the frontend and backend locally. | MVP |
 | G-5 | Register, sign in, and provide a member profile dashboard. | Beta |
 | G-6 | Enforce member, moderator, and administrator permissions on the backend. | Beta |
@@ -70,7 +70,7 @@ People have skills they can teach and subjects they want to learn, but they may 
 |---|---|---|
 | Visitor / learner | Browse skills and find a person to learn from. | MVP |
 | Skill teacher | Publish a skill listing and manage its details. | MVP |
-| Session participant | Send or respond to a request and see its status. | MVP |
+| Session participant | Create, view, update, and delete requests and see their status. | MVP |
 | Registered member | Sign in, manage their profile, and manage their own listings and requests. | Beta |
 | Moderator | Review reports and hide inappropriate listings. | Beta |
 | Administrator | Manage users, categories, and listings across the platform. | Beta |
@@ -83,9 +83,8 @@ A member can both teach and learn. The MVP has no production authentication; any
 
 - Browse available skill listings and view a listing's details.
 - Create, update, and delete skill listings.
-- Send a learning session request for an available listing.
-- Let the listing owner accept or decline a request.
-- View request status and the requests relevant to a participant.
+- Create, view, update, and delete session requests.
+- Set and view request status.
 - Validate submitted data and return useful API errors.
 - Run the complete frontend and backend locally.
 
@@ -113,8 +112,8 @@ A member can both teach and learn. The MVP has no production authentication; any
 |---|---|---|
 | Must | Browse and view skill listings. | MVP |
 | Must | Create, update, and delete skill listings. | MVP |
-| Must | Create session requests and accept or decline them. | MVP |
-| Must | Display the status of a participant's session requests. | MVP |
+| Must | Create, view, update, and delete session requests. | MVP |
+| Must | Display and update request status. | MVP |
 | Must | Register and authenticate members. | Beta |
 | Must | Enforce ownership and role/scope authorization on the backend. | Beta |
 | Must | Provide member profile access. | Beta |
@@ -134,8 +133,8 @@ A member can both teach and learn. The MVP has no production authentication; any
 | US-2 | As a learner, I want to view a listing's details so that I can decide whether to contact the teacher. | MVP |
 | US-3 | As a teacher, I want to create and maintain a skill listing so that learners can discover what I can teach. | MVP |
 | US-4 | As a learner, I want to request a session so that I can ask the teacher to arrange a learning exchange. | MVP |
-| US-5 | As a teacher, I want to accept or decline a request so that the learner knows my response. | MVP |
-| US-6 | As a participant, I want to see request status so that I know whether the request is pending, accepted, or declined. | MVP |
+| US-5 | As a participant, I want to view, update, and delete my session request so that I can manage my learning plans. | MVP |
+| US-6 | As a participant, I want to see and update request status so that its progress is clear. | MVP |
 
 ### Beta
 
@@ -152,8 +151,8 @@ A member can both teach and learn. The MVP has no production authentication; any
 ### MVP
 
 - A reviewer can browse listings, view details, and complete listing CRUD using the application.
-- A learner can submit a request and the teacher can accept or decline it.
-- Both participants can see the resulting request status.
+- A learner can create, view, update, and delete a session request.
+- Request status can be viewed and updated.
 - The demo runs locally using the repository's documented setup.
 
 ### Beta
@@ -168,7 +167,7 @@ A member can both teach and learn. The MVP has no production authentication; any
 - The required stack is React with TypeScript and FastAPI with Python.
 - Members can both teach and learn.
 - Session coordination initially consists of a request and an accept/decline response; scheduling and communication can happen outside the application.
-- The database engine has not been selected. Persistent storage is needed for a complete listing/request workflow; select a database compatible with local development and the eventual hosting plan.
+- SQLite is used for local development; configure PostgreSQL through `DATABASE_URL` for hosted persistence.
 - Authentication is not part of the MVP. Do not treat client-provided identity as a secure ownership check.
 - The existing Vercel configuration is present, but deployment is planned for Beta and is not required for the MVP.
 - The project scope should favor a small complete experience over optional integrations.
