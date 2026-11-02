@@ -8,7 +8,7 @@
 | Status | Draft |
 | Related docs | [Product Requirements Document (PRD)](01-prd.md), [Software Requirements Specification (SRS)](02-srs.md) |
 
-Sections and tables are marked **MVP** or **Beta**. Build the MVP for the mid-term; Beta extends it for the final. Design choices marked as open must be confirmed before implementation rather than assumed to exist.
+Sections and tables are marked **MVP** or **Beta**. The MVP implementation below covers skill listing and session request CRUD; Beta extends it with authentication and permissions.
 
 **Documents in this set**
 
@@ -20,9 +20,9 @@ Sections and tables are marked **MVP** or **Beta**. Build the MVP for the mid-te
 
 ## 1. Overview
 
-- **MVP:** Extend the existing React + TypeScript and FastAPI + Python starter into a local peer-learning application with persistent skill listings and session request workflows over REST.
+- **MVP:** React + TypeScript and FastAPI + Python implement persistent skill listing and session request CRUD over REST.
 - **Beta:** Add accounts, profiles, member/moderator/administrator roles, backend permission scopes, moderation, administration, and deployment.
-- **Current status:** The repository currently has a hello/health FastAPI API, a frontend hello form, a Vite API proxy, and Vercel configuration. SkillSwap features and persistence are not yet implemented.
+- **Current status:** The repository includes MVP CRUD endpoints and UI. SQLite is the local database; PostgreSQL is supported through the `DATABASE_URL` environment variable. Authentication and Beta authorization are not implemented.
 
 ## 2. Tech stack
 
@@ -32,13 +32,16 @@ Sections and tables are marked **MVP** or **Beta**. Build the MVP for the mid-te
 | Frontend | Vite + React + TypeScript | Required course stack and already in the repository | MVP |
 | API format | JSON over REST | Simple interface between the web client and API | MVP |
 | Data validation | Pydantic through FastAPI | Validate payloads at the backend boundary | MVP |
-| Database | To be selected | Must support local development and persistent listings/requests; decide before implementing storage | MVP |
-| Persistence layer | To be selected with database | Keep database access behind a small repository/session boundary | MVP |
+| ORM / models | SQLModel | Typed SQL persistence and validation models | MVP |
+| Database (local) | SQLite | Zero-configuration local development and persistence across restarts | MVP |
+| Database (hosted) | PostgreSQL through `DATABASE_URL` | Supports a hosted database such as Supabase | MVP |
+| PostgreSQL driver | Psycopg 3 | SQLModel/SQLAlchemy PostgreSQL connectivity | MVP |
+| Persistence layer | SQLModel session dependency | Reuse a request-scoped database session | MVP |
 | Hosting | Vercel configuration is present | Existing config describes separate frontend and backend services; verify compatibility before Beta deployment | Beta |
 | Password hashing | Maintained password-hashing library (choice pending) | Never store plaintext passwords | Beta |
 | Authentication | Token or secure-cookie design (choice pending) | Verify identity on protected API requests | Beta |
 
-Do not add a database, ORM, migration framework, or authentication library until the corresponding implementation decision is made and dependencies are reviewed.
+The MVP creates tables from SQLModel metadata at API startup. A versioned migration framework is deferred until schema evolution requires it.
 
 ## 3. Architecture
 
@@ -47,7 +50,7 @@ flowchart LR
     Browser[Browser] -->|"/"| FE[React + TypeScript]
     Browser -->|"/api/*"| API[FastAPI]
     FE -->|fetch JSON| API
-    API -->|MVP persistence| DB[(Database to be selected)]
+    API -->|SQLite local / PostgreSQL hosted| DB[(SQLModel database)]
     API -->|Beta| Auth[Authentication and authorization]
 ```
 
@@ -57,7 +60,7 @@ The target backend request flow is:
 
 1. Router receives the HTTP request and validates its payload with a Pydantic schema.
 2. (Beta) Authentication dependency resolves the caller's identity from verified credentials.
-3. Authorization/business logic checks listing ownership, request participation, role, scope, and state transition.
+3. Business logic validates resource references and allowed state values. Beta adds ownership, participant, role, and scope checks.
 4. Persistence boundary reads or writes the records.
 5. Router returns a documented response schema and HTTP status.
 
@@ -78,7 +81,7 @@ sequenceDiagram
     R-->>C: 201 Created + JSON
 ```
 
-For MVP ownership-sensitive operations, use a controlled local/demo identity strategy. Do not accept arbitrary client-supplied owner IDs and describe them as secure authentication. Replace the demo identity boundary with verified account identity in Beta.
+The MVP is a shared demonstration with no authentication or ownership checks. Beta must derive ownership and participant identity from verified credentials, never from arbitrary client-supplied identifiers.
 
 ### 3.2 Authentication and authorization flow — Beta
 
@@ -104,27 +107,20 @@ The credential transport, token/cookie settings, expiration, and refresh behavio
 
 ## 4. Project structure
 
-The current repository is a small starter with `backend/main.py` and `frontend/src/App.tsx`. Introduce modules incrementally as features are implemented; the following is a proposed target, not the current file tree:
+The implementation is intentionally small and organized around the current feature set:
 
 ```text
 backend/
   main.py
-  app/
-    config.py                  # environment-backed settings
-    routers/
-      skills.py                # MVP listing endpoints
-      session_requests.py      # MVP request workflow
-      auth.py                  # Beta account endpoints
-      users.py                 # Beta profile and admin endpoints
-    schemas/                   # Pydantic request/response models
-    services/                  # business rules and state transitions
-    models/                    # persisted entities
-    db/                        # database session and persistence setup
+  database.py                  # engine, DATABASE_URL, request-scoped sessions
+  models.py                    # SQLModel tables and API schemas
+  tests/
+    test_api.py                # CRUD, validation, cascade, and persistence tests
 frontend/
   src/
-    api/                       # typed API calls
-    components/                # reusable forms and listing components
-    pages/                     # listing, requests, and Beta profile screens
+    api.ts                     # typed REST client
+    App.tsx                    # MVP listing and session request workflows
+    index.css
 docs/
   01-prd.md
   02-srs.md
@@ -138,25 +134,22 @@ docs/
 | Field | Type / rule | Notes |
 |---|---|---|
 | `id` | Stable identifier, primary key | Generated by persistence layer |
-| `owner_id` | Required owner reference or controlled demo identity | Must not be treated as authenticated identity in MVP |
+| `teacher_name` | Required bounded string | Display name entered for the shared MVP demonstration |
 | `title` | Required bounded string | Trim whitespace and reject empty value |
 | `description` | Required bounded text | Validate maximum size |
-| `category_id` | Category reference, if categories are part of the selected MVP scope | Category management is planned for Beta |
-| `is_available` | Boolean/status | Unavailable listings cannot receive new requests |
+| `category` | Required bounded string | Category management is planned for Beta |
 | `created_at` | Timestamp | Set by backend |
-| `updated_at` | Timestamp | Updated by backend |
 
 ### 5.2 Session request — MVP
 
 | Field | Type / rule | Notes |
 |---|---|---|
 | `id` | Stable identifier, primary key | Generated by persistence layer |
-| `listing_id` | Required listing reference | Listing must exist and be available |
-| `learner_id` | Required participant identity | Derived from controlled MVP demo identity; authenticated in Beta |
-| `teacher_id` | Listing owner's identity | Derived from the referenced listing, not trusted from request body |
-| `message` | Optional or required bounded text | Final requirement to be decided during implementation |
-| `status` | `pending`, `accepted`, or `declined` | Starts as `pending`; owner responds |
-| `created_at`, `updated_at` | Timestamps | Set by backend |
+| `skill_listing_id` | Required foreign key to a listing | Related requests are deleted when their listing is deleted |
+| `learner_name` | Required bounded string | Display name entered for the shared MVP demonstration |
+| `message` | Required bounded text | Learner's goal or introduction |
+| `status` | `pending`, `accepted`, or `declined` | Starts as `pending`; editable in the shared MVP demo |
+| `created_at` | Timestamp | Set by backend |
 
 ### 5.3 Full data model — Beta
 
@@ -165,7 +158,8 @@ docs/
 | `User` | Unique email, password hash, display name, role, profile data, timestamps | Beta |
 | `Category` | Unique name, description | Beta |
 | `SkillListing` | Owner, category, title, description, availability/visibility, timestamps | MVP/Beta |
-| `SessionRequest` | Listing, learner, teacher/listing owner, message, status, timestamps | MVP/Beta |
+| `SessionRequest` | Skill listing foreign key, learner name, message, status, created timestamp | MVP |
+| `SessionRequest` | Listing, learner, teacher/listing owner, message, status, timestamps | Beta identity fields |
 | `Report` | Reporter, listing, reason, review state, moderator action, timestamps | Beta |
 
 Use foreign keys and database constraints for required references and unique account email. Consider indexes for listing availability/category and session request participants/status. Decide cascade, archival, and deletion behavior before writing migrations.
@@ -174,11 +168,11 @@ Use foreign keys and database constraints for required references and unique acc
 
 Keep API schemas separate by operation where fields differ:
 
-- `SkillCreate` and `SkillUpdate`: accepted listing fields; do not accept arbitrary owner or moderation fields from the client.
-- `SkillRead`: public listing fields and appropriate timestamps; omit private account data.
-- `SessionRequestCreate`: listing identifier and request message/learning goal; derive teacher from listing.
-- `SessionRequestResponse`: only the permitted response status; enforce who may submit it in backend logic.
-- `SessionRequestRead`: participant-safe request details.
+- `SkillListingCreate` and `SkillListingUpdate`: validated listing fields.
+- `SkillListingRead`: public listing fields and creation timestamp; omit private account data.
+- `SessionRequestCreate`: listing identifier, learner name, and request message.
+- `SessionRequestUpdate`: explicitly allowed request fields, including status.
+- `SessionRequestRead`: request fields and identifier.
 - Beta account/profile schemas must never expose password hashes or credential secrets.
 
 ## 6. REST API design
@@ -194,11 +188,13 @@ All application routes use the `/api` prefix to match the Vite proxy and Vercel 
 | `GET` | `/api/skills/{skill_id}` | Retrieve listing details | `200` |
 | `PATCH` | `/api/skills/{skill_id}` | Update an owned listing | `200` |
 | `DELETE` | `/api/skills/{skill_id}` | Delete an owned listing | `204` |
-| `POST` | `/api/session-requests` | Create a request for an available listing | `201` |
-| `GET` | `/api/session-requests` | List requests relevant to the caller | `200` |
-| `PATCH` | `/api/session-requests/{request_id}` | Accept or decline a pending request | `200` |
+| `POST` | `/api/session-requests` | Create a request for an existing listing | `201` |
+| `GET` | `/api/session-requests` | List shared MVP requests | `200` |
+| `GET` | `/api/session-requests/{request_id}` | Retrieve request details | `200` |
+| `PATCH` | `/api/session-requests/{request_id}` | Update request fields or status | `200` |
+| `DELETE` | `/api/session-requests/{request_id}` | Delete a request | `204` |
 
-The request-list endpoint must scope results to relevant participants. Since the MVP has no production authentication, its demo identity mechanism is an explicit limitation and must not be treated as a production access control.
+The MVP has no authentication; both resource collections are shared demonstration data. Do not treat the MVP as providing owner-only access.
 
 ### 6.2 Endpoints — Beta
 
@@ -226,8 +222,10 @@ POST /api/skills
 Content-Type: application/json
 
 {
+  "teacher_name": "Ari",
   "title": "Beginner guitar",
-  "description": "Learn basic chords and strumming patterns."
+  "description": "Learn basic chords and strumming patterns.",
+  "category": "Music"
 }
 ```
 
@@ -238,12 +236,13 @@ POST /api/session-requests
 Content-Type: application/json
 
 {
-  "listing_id": 12,
+  "skill_listing_id": 12,
+  "learner_name": "Jamie",
   "message": "I would like to learn the basic chords."
 }
 ```
 
-Respond to a pending request:
+Update a session request:
 
 ```http
 PATCH /api/session-requests/31
@@ -262,7 +261,7 @@ Use FastAPI validation errors for invalid request data and a consistent JSON sha
 
 ```json
 {
-  "detail": "The session request is no longer pending."
+  "detail": "Skill listing not found."
 }
 ```
 
@@ -271,37 +270,33 @@ Expected status codes include `401` for missing/invalid Beta credentials, `403` 
 ### 6.5 Design rules
 
 - Validate all client input on the backend.
-- Do not trust client-submitted owner, learner, teacher, role, or scope values; derive them from server-side identity and resource relationships.
-- Return only fields appropriate to the caller.
-- Enforce request-state transitions and listing availability in backend business logic.
+- Do not add owner, role, or scope fields to MVP payloads; Beta identity and permissions must come from verified credentials.
+- Keep response schemas limited to the public MVP fields.
+- Verify that session requests reference an existing listing and use an allowed status.
 - Use `404` for nonexistent resources and `403` for authenticated callers lacking permission, consistently.
 
 ## 7. Database access
 
-Database engine, ORM, and migration tool are open decisions. Before implementation:
+SQLModel manages the relational tables. SQLite is the local default, stored at `backend/skillswap.db`. When `DATABASE_URL` is set, the API uses that database; PostgreSQL URLs are handled with Psycopg 3. A request-scoped SQLModel `Session` is yielded through FastAPI dependency injection and closed after each request. At startup, SQLModel creates missing tables. The current schema uses a foreign key with `ON DELETE CASCADE` from session requests to skill listings.
 
-1. Select a relational database that can be used locally and hosted for Beta.
-2. Select a persistence library compatible with FastAPI and the project scope.
-3. Define a repeatable schema creation/migration workflow.
-4. Use a per-request database session and ensure it is closed reliably.
-5. Keep commits/transactions in service or persistence boundaries, not scattered through UI-facing route code.
-
-MVP data must persist across API restarts to support a complete listing and request workflow.
+The database URL must be configured in the hosting provider for deployed persistence. SQLite is intended for local use, not ephemeral serverless storage.
 
 ## 8. Configuration
 
-The existing starter does not yet define database or authentication settings. As those features are added:
+The database connection is configured as follows:
 
 - Read deployment-specific configuration from environment variables.
 - Validate required settings at startup and fail clearly when production configuration is missing.
 - Keep `.env` files containing real secrets out of version control.
 - Provide safe local-development defaults only for non-secret configuration.
-- Beta settings may include database connection URL, credential signing secret, credential lifetimes, and allowed origins, depending on the final implementation.
+- `DATABASE_URL` is optional locally and required for hosted persistent data. It must not be committed or exposed to the browser.
+- Beta settings may include credential signing secrets, credential lifetimes, and allowed origins.
 
 ## 9. Deployment
 
-- **MVP:** run the frontend with Vite and the API with FastAPI locally. The Vite proxy forwards `/api` to the API.
-- **Beta:** verify the existing `vercel.json` frontend/backend service setup, configure the chosen database and secrets in the host, enable HTTPS, and perform a deployment smoke test.
+- **MVP local:** run the frontend with Vite and API with FastAPI. The Vite proxy forwards `/api` to the API; SQLite data persists in the backend directory.
+- **Hosted demo:** configure `DATABASE_URL` in the backend service using a PostgreSQL connection string, then deploy through the existing `vercel.json` service setup. Vercel's writable filesystem is not a persistent database.
+- Use HTTPS and verify the backend and database together after deployment.
 
 Do not claim the app is deployed until the full frontend, API, and selected database have been verified together.
 
@@ -360,8 +355,8 @@ The migration tool is not selected. Choose one when selecting the database and p
 
 | Risk / decision | Impact | Action |
 |---|---|---|
-| Database and ORM are undecided. | Blocks reliable persistent CRUD and deployment. | Choose local and hosting-compatible options before implementing storage. |
-| MVP has no real authentication. | Ownership-based features cannot be production-secure. | Limit the demo identity approach and replace it with verified identity in Beta. |
+| Hosted database credentials are not configured in source control. | A deployed API without `DATABASE_URL` would use local SQLite and lose data between serverless instances. | Configure the Supabase/PostgreSQL connection as a backend environment variable in Vercel. |
+| MVP has no real authentication. | Shared CRUD data is not owner-private. | Keep the MVP explicit as a shared demo and add verified identity in Beta. |
 | Authentication transport is undecided. | Affects frontend storage and backend security. | Select and document token or secure-session design before Beta auth. |
 | Course scope is limited. | Large optional features can prevent a complete demo. | Prioritize listings and the request lifecycle; leave integrations out of scope. |
 | Existing Vercel config has not been validated with a database. | Deployment may differ from local behavior. | Verify the complete hosted stack during Beta implementation. |
