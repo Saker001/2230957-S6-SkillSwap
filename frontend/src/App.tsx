@@ -422,7 +422,7 @@ export default function App() {
         )}
       </section>
       <footer>
-        MVP demo data is shared and has no sign-in yet. Authentication and ownership permissions are planned for Beta.
+        Shared data, no sign-in. Authentication and ownership controls are planned for Beta.
       </footer>
     </main>
   )
