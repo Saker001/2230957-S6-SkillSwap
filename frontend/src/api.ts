@@ -51,6 +51,53 @@ export type GroupMember = {
   can_assign: boolean
 }
 
+export type AdminUser = User & {
+  is_active: boolean
+  is_banned: boolean
+  ban_reason: string | null
+  banned_at: string | null
+}
+
+export type AdminAuditEvent = {
+  id: number
+  actor_id: number | null
+  action: string
+  target_type: string
+  target_id: string
+  details: Record<string, unknown>
+  created_at: string
+}
+
+export type AdminPage<T> = {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type AdminOverview = {
+  users: number
+  banned_users: number
+  records: number
+  groups: number
+  recent_activity: AdminAuditEvent[]
+}
+
+export type AdminUserDetail = {
+  user: AdminUser
+  records: SkillListing[]
+  session_requests: SessionRequest[]
+  groups: SkillGroup[]
+  sessions: UserSession[]
+  recent_activity: AdminAuditEvent[]
+}
+
+export type SkillCategory = {
+  id: number
+  name: string
+  created_at: string
+}
+
 type AuthResponse = {
   access_token: string
   token_type: "bearer"
@@ -284,4 +331,96 @@ export const api = {
     }),
   deleteSessionRequest: (id: number) =>
     request<void>(`/api/session-requests/${id}`, { method: "DELETE" }),
+  adminOverview: () => request<AdminOverview>("/api/admin/overview"),
+  adminUsers: (params: {
+    q?: string
+    role?: string
+    banned?: boolean | null
+    limit?: number
+    offset?: number
+  }) => {
+    const query = new URLSearchParams()
+    if (params.q) query.set("q", params.q)
+    if (params.role) query.set("role", params.role)
+    if (params.banned !== null && params.banned !== undefined) {
+      query.set("banned", String(params.banned))
+    }
+    query.set("limit", String(params.limit ?? 25))
+    query.set("offset", String(params.offset ?? 0))
+    return request<AdminPage<AdminUser>>(`/api/admin/users?${query}`)
+  },
+  adminUserDetail: (id: number) =>
+    request<AdminUserDetail>(`/api/admin/users/${id}`),
+  adminUpdateRole: (id: number, role: User["role"]) =>
+    request<AdminUser>(`/api/admin/users/${id}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  adminBanUser: (id: number, reason: string) =>
+    request<AdminUser>(`/api/admin/users/${id}/ban`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+  adminUnbanUser: (id: number) =>
+    request<AdminUser>(`/api/admin/users/${id}/unban`, { method: "POST" }),
+  adminBulkBan: (user_ids: number[], reason: string) =>
+    request<{ affected: number }>("/api/admin/users/bulk-ban", {
+      method: "POST",
+      body: JSON.stringify({ user_ids, reason }),
+    }),
+  adminBulkUnban: (ids: number[]) =>
+    request<{ affected: number }>("/api/admin/users/bulk-unban", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  adminRevokeSessions: (id: number) =>
+    request<{ affected: number }>(`/api/admin/users/${id}/revoke-sessions`, {
+      method: "POST",
+    }),
+  adminRevokeSession: (userId: number, sessionId: string) =>
+    request<void>(`/api/admin/users/${userId}/sessions/${sessionId}/revoke`, {
+      method: "POST",
+    }),
+  adminListings: (params: { q?: string; category?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams()
+    if (params.q) query.set("q", params.q)
+    if (params.category) query.set("category", params.category)
+    query.set("limit", String(params.limit ?? 25))
+    query.set("offset", String(params.offset ?? 0))
+    return request<AdminPage<SkillListing>>(`/api/admin/listings?${query}`)
+  },
+  adminDeleteListing: (id: number) =>
+    request<void>(`/api/admin/listings/${id}`, { method: "DELETE" }),
+  adminBulkDeleteListings: (ids: number[]) =>
+    request<{ affected: number }>("/api/admin/listings/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  adminGroups: (params: { q?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams()
+    if (params.q) query.set("q", params.q)
+    query.set("limit", String(params.limit ?? 25))
+    query.set("offset", String(params.offset ?? 0))
+    return request<AdminPage<SkillGroup>>(`/api/admin/groups?${query}`)
+  },
+  adminDeleteGroup: (id: number) =>
+    request<void>(`/api/admin/groups/${id}`, { method: "DELETE" }),
+  adminBulkDeleteGroups: (ids: number[]) =>
+    request<{ affected: number }>("/api/admin/groups/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  adminCategories: () => request<SkillCategory[]>("/api/admin/categories"),
+  adminCreateCategory: (name: string) =>
+    request<SkillCategory>("/api/admin/categories", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  adminRenameCategory: (id: number, name: string) =>
+    request<SkillCategory>(`/api/admin/categories/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  adminDeleteCategory: (id: number) =>
+    request<void>(`/api/admin/categories/${id}`, { method: "DELETE" }),
 }

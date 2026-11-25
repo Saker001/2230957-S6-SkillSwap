@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from admin import router as admin_router
 from auth import User, router as auth_router
 from authorization import (
     GroupAccess,
@@ -81,6 +82,7 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 @app.get("/api/health")

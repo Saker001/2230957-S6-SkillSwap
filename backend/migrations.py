@@ -41,3 +41,24 @@ def migrate_resource_ownership(engine: Engine) -> None:
                     "ON session_requests (learner_id)"
                 )
             )
+
+
+def migrate_admin_user_fields(engine: Engine) -> None:
+    with engine.begin() as connection:
+        tables = set(inspect(connection).get_table_names())
+        if "users" not in tables:
+            return
+        columns = {column["name"] for column in inspect(connection).get_columns("users")}
+        if "is_banned" not in columns:
+            connection.execute(
+                text("ALTER TABLE users ADD COLUMN is_banned BOOLEAN NOT NULL DEFAULT FALSE")
+            )
+        if "ban_reason" not in columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN ban_reason VARCHAR(500)"))
+        if "banned_at" not in columns:
+            connection.execute(
+                text("ALTER TABLE users ADD COLUMN banned_at TIMESTAMP WITH TIME ZONE")
+            )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_users_is_banned ON users (is_banned)")
+        )

@@ -94,6 +94,9 @@ class User(SQLModel, table=True):
     password_hash: str
     role: str = Field(default=ROLE_MEMBER, max_length=20, index=True)
     is_active: bool = Field(default=True, index=True)
+    is_banned: bool = Field(default=False, index=True)
+    ban_reason: str | None = Field(default=None, max_length=500)
+    banned_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     failed_login_attempts: int = Field(default=0)
     locked_until: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     created_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True))
@@ -187,6 +190,8 @@ class AuthResponse(BaseModel):
 
 
 class SessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     created_at: datetime
     expires_at: datetime
@@ -296,6 +301,7 @@ def get_current_user(
     if (
         user is None
         or not user.is_active
+        or user.is_banned
         or refresh_session is None
         or refresh_session.user_id != user_id
         or refresh_session.revoked_at is not None
@@ -343,6 +349,7 @@ def log_in(
         user is None
         or not valid_password
         or not user.is_active
+        or user.is_banned
         or (user.locked_until is not None and _is_future(user.locked_until))
     ):
         if user is not None and user.is_active:
@@ -381,7 +388,7 @@ def refresh_access_token(
         raise _unauthorized()
 
     user = session.get(User, current.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.is_banned:
         _clear_refresh_cookie(response)
         raise _unauthorized()
 

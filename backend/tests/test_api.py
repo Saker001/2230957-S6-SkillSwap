@@ -21,7 +21,8 @@ os.environ["PASSWORD_PEPPER"] = "test-only-password-pepper-not-for-deployments"
 
 from database import engine  # noqa: E402
 from auth import JWT_ISSUER, JWT_SECRET_KEY, RefreshSession, User  # noqa: E402
-from migrations import migrate_resource_ownership  # noqa: E402
+from migrations import migrate_admin_user_fields, migrate_resource_ownership  # noqa: E402
+from permissions import ROLE_ADMIN  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -74,6 +75,14 @@ class SkillSwapApiTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200, login.text)
         client.headers.update({"Authorization": f"Bearer {login.json()['access_token']}"})
         return client, login.json()["user"]
+
+    def promote_to_admin(self, user_id: int | None = None) -> None:
+        with Session(engine) as database_session:
+            user = database_session.get(User, user_id or self.user_id)
+            self.assertIsNotNone(user)
+            user.role = ROLE_ADMIN
+            database_session.add(user)
+            database_session.commit()
 
     def create_skill(self, client: TestClient | None = None, **extra) -> dict:
         response = (client or self.client).post(
@@ -424,6 +433,201 @@ class SkillSwapApiTests(unittest.TestCase):
         self.assertIn("/api/auth/login", paths)
         self.assertIn("/api/auth/refresh", paths)
         self.assertIn("/api/users/me", paths)
+        self.assertIn("/api/admin/overview", paths)
+        self.assertIn("/api/admin/users", paths)
+        self.assertIn("/api/admin/listings", paths)
+        self.assertIn("/api/admin/groups", paths)
+
+    def test_admin_routes_are_denied_to_members_and_guests(self) -> None:
+        anonymous = TestClient(app)
+        for path in ("/api/admin/overview", "/api/admin/users", "/api/admin/categories"):
+            self.assertEqual(self.client.get(path).status_code, 403)
+            self.assertEqual(anonymous.get(path).status_code, 401)
+        anonymous.close()
+
+    def test_admin_user_controls_enforce_safety_bans_and_audit(self) -> None:
+        member_client, member = self.create_member()
+        try:
+            self.promote_to_admin()
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{self.user_id}/role",
+                    json={"role": "user"},
+                ).status_code,
+                409,
+            )
+            self.assertEqual(
+                self.client.post(
+                    f"/api/admin/users/{self.user_id}/ban",
+                    json={"reason": "Self ban"},
+                ).status_code,
+                409,
+            )
+
+            listing = member_client.post(
+                "/api/skills",
+                json={
+                    "teacher_name": "Casey",
+                    "title": "Member piano",
+                    "description": "A member record.",
+                    "category": "Music",
+                },
+            )
+            self.assertEqual(listing.status_code, 201)
+            detail = self.client.get(f"/api/admin/users/{member['id']}")
+            self.assertEqual(detail.status_code, 200, detail.text)
+            self.assertEqual(len(detail.json()["records"]), 1)
+            self.assertEqual(len(detail.json()["sessions"]), 1)
+
+            banned = self.client.post(
+                f"/api/admin/users/{member['id']}/ban",
+                json={"reason": "Repeated abuse"},
+            )
+            self.assertEqual(banned.status_code, 200, banned.text)
+            self.assertTrue(banned.json()["is_banned"])
+            self.assertEqual(member_client.get("/api/users/me").status_code, 401)
+            self.assertEqual(
+                member_client.post(
+                    "/api/auth/login",
+                    json={
+                        "email": member["email"],
+                        "password": "correct horse battery staple",
+                    },
+                ).status_code,
+                401,
+            )
+
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{member['id']}/role",
+                    json={"role": "admin"},
+                ).status_code,
+                409,
+            )
+            self.assertEqual(
+                self.client.post(f"/api/admin/users/{member['id']}/unban").status_code,
+                200,
+            )
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{member['id']}/role",
+                    json={"role": "admin"},
+                ).status_code,
+                200,
+            )
+            self.assertEqual(
+                self.client.post(
+                    f"/api/admin/users/{member['id']}/ban",
+                    json={"reason": "Cannot ban an admin"},
+                ).status_code,
+                409,
+            )
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{member['id']}/role",
+                    json={"role": "user"},
+                ).status_code,
+                200,
+            )
+            fresh_login = member_client.post(
+                "/api/auth/login",
+                json={
+                    "email": member["email"],
+                    "password": "correct horse battery staple",
+                },
+            )
+            self.assertEqual(fresh_login.status_code, 200, fresh_login.text)
+            new_session_id = fresh_login.json()["session_id"]
+            revoked = self.client.post(
+                f"/api/admin/users/{member['id']}/sessions/{new_session_id}/revoke"
+            )
+            self.assertEqual(revoked.status_code, 204, revoked.text)
+            self.assertEqual(
+                member_client.get(
+                    "/api/users/me",
+                    headers={"Authorization": f"Bearer {fresh_login.json()['access_token']}"},
+                ).status_code,
+                401,
+            )
+
+            events = self.client.get("/api/admin/activity")
+            self.assertEqual(events.status_code, 200)
+            actions = [event["action"] for event in events.json()]
+            self.assertIn("user.banned", actions)
+            self.assertIn("user.unbanned", actions)
+            self.assertIn("user.role_changed", actions)
+            self.assertIn("user.session_revoked", actions)
+        finally:
+            member_client.close()
+
+    def test_admin_filters_bulk_actions_moderation_and_categories(self) -> None:
+        self.promote_to_admin()
+        member_client, member = self.create_member()
+        try:
+            filtered_users = self.client.get(
+                "/api/admin/users",
+                params={"q": member["email"], "banned": "false", "limit": 1},
+            )
+            self.assertEqual(filtered_users.status_code, 200, filtered_users.text)
+            self.assertEqual(filtered_users.json()["total"], 1)
+            self.assertEqual(filtered_users.json()["items"][0]["id"], member["id"])
+
+            bulk_ban = self.client.post(
+                "/api/admin/users/bulk-ban",
+                json={"user_ids": [member["id"]], "reason": "Policy violation"},
+            )
+            self.assertEqual(bulk_ban.status_code, 200, bulk_ban.text)
+            self.assertEqual(bulk_ban.json()["affected"], 1)
+            bulk_unban = self.client.post(
+                "/api/admin/users/bulk-unban",
+                json={"ids": [member["id"]]},
+            )
+            self.assertEqual(bulk_unban.status_code, 200, bulk_unban.text)
+            self.assertEqual(bulk_unban.json()["affected"], 1)
+
+            category = self.client.post("/api/admin/categories", json={"name": "Music"})
+            self.assertEqual(category.status_code, 201, category.text)
+            listing = self.create_skill(category="Music")
+            renamed = self.client.patch(
+                f"/api/admin/categories/{category.json()['id']}",
+                json={"name": "Performing arts"},
+            )
+            self.assertEqual(renamed.status_code, 200, renamed.text)
+            self.assertEqual(
+                self.client.get(
+                    "/api/admin/listings",
+                    params={"category": "Performing arts"},
+                ).json()["items"][0]["id"],
+                listing["id"],
+            )
+            self.assertEqual(
+                self.client.delete(f"/api/admin/categories/{category.json()['id']}").status_code,
+                409,
+            )
+
+            group = self.create_group("Admin moderation target")
+            self.assertEqual(
+                self.client.get("/api/admin/groups", params={"q": "moderation"}).json()["items"][0]["id"],
+                group["id"],
+            )
+            listings_deleted = self.client.post(
+                "/api/admin/listings/bulk-delete",
+                json={"ids": [listing["id"]]},
+            )
+            groups_deleted = self.client.post(
+                "/api/admin/groups/bulk-delete",
+                json={"ids": [group["id"]]},
+            )
+            self.assertEqual(listings_deleted.status_code, 200, listings_deleted.text)
+            self.assertEqual(groups_deleted.status_code, 200, groups_deleted.text)
+            self.assertEqual(listings_deleted.json()["affected"], 1)
+            self.assertEqual(groups_deleted.json()["affected"], 1)
+            self.assertEqual(
+                self.client.delete(f"/api/admin/categories/{category.json()['id']}").status_code,
+                204,
+            )
+        finally:
+            member_client.close()
 
     def test_authentication_rejects_missing_or_invalid_tokens(self) -> None:
         anonymous = TestClient(app)
@@ -734,6 +938,8 @@ class SkillSwapApiTests(unittest.TestCase):
 
             migrate_resource_ownership(legacy_engine)
             migrate_resource_ownership(legacy_engine)
+            migrate_admin_user_fields(legacy_engine)
+            migrate_admin_user_fields(legacy_engine)
             with legacy_engine.connect() as connection:
                 skill = connection.execute(
                     text("SELECT title, owner_id FROM skill_listings WHERE id = 1")

@@ -7,6 +7,7 @@ import {
   type User,
   type UserSession,
 } from "./api"
+import AdminDashboard from "./AdminDashboard"
 
 const emptySkill = {
   teacher_name: "",
@@ -41,6 +42,7 @@ const emptyGroupMember = {
 
 export default function App() {
   const [authStatus, setAuthStatus] = useState<"restoring" | "guest" | "authenticated">("restoring")
+  const [adminRoute, setAdminRoute] = useState(() => window.location.hash === "#admin")
   const [user, setUser] = useState<User | null>(null)
   const [authMode, setAuthMode] = useState<"login" | "signup">("login")
   const [authForm, setAuthForm] = useState(emptyAuthForm)
@@ -81,6 +83,19 @@ export default function App() {
   const canCreateGroupSkill = groupOwner || groupMember?.can_create === true
   const canEditGroupSkill = groupOwner || groupMember?.can_edit === true
   const canAssignGroupSkill = groupOwner || groupMember?.can_assign === true
+
+  useEffect(() => {
+    const updateRoute = () => setAdminRoute(window.location.hash === "#admin")
+    window.addEventListener("hashchange", updateRoute)
+    return () => window.removeEventListener("hashchange", updateRoute)
+  }, [])
+
+  useEffect(() => {
+    if (adminRoute && authStatus === "authenticated" && user?.role !== "admin") {
+      window.location.hash = ""
+      setAdminRoute(false)
+    }
+  }, [adminRoute, authStatus, user?.role])
 
   const loadGroupData = useCallback(async (groupId: number) => {
     const [members, listings] = await Promise.all([
@@ -603,6 +618,29 @@ export default function App() {
     )
   }
 
+  if (adminRoute && user.role === "admin") {
+    return (
+      <main className="app-shell">
+        <header className="hero admin-hero">
+          <p className="eyebrow">Learn from each other</p>
+          <h1>SkillSwap</h1>
+          <div className="account-toolbar">
+            <span>Signed in as <strong>{user.display_name}</strong> (admin)</span>
+            <button className="secondary" type="button" onClick={handleSignOut}>Sign out</button>
+          </div>
+        </header>
+        {error && <p className="alert error" role="alert">{error}</p>}
+        {notice && <p className="alert success" role="status">{notice}</p>}
+        <AdminDashboard
+          onExit={() => {
+            window.location.hash = ""
+            setAdminRoute(false)
+          }}
+        />
+      </main>
+    )
+  }
+
   return (
     <main className="app-shell">
       <header className="hero">
@@ -613,6 +651,15 @@ export default function App() {
         </p>
         <div className="account-toolbar">
           <span>Signed in as <strong>{user.display_name}</strong> ({user.role})</span>
+          {user.role === "admin" && (
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => { window.location.hash = "admin"; setAdminRoute(true) }}
+            >
+              Admin dashboard
+            </button>
+          )}
           <button className="secondary" type="button" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>

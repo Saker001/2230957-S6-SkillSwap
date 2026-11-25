@@ -2,7 +2,7 @@
 
 SkillSwap is a peer-to-peer learning platform where members can share skills they teach, find skills they want to learn, and arrange learning sessions.
 
-> **Project status:** Skill and session-request CRUD, account authentication, ownership checks, and backend RBAC are implemented. Groups and the admin dashboard are later milestones.
+> **Project status:** Skill and session-request CRUD, account authentication, ownership checks, groups, and the admin dashboard are implemented.
 
 ## Project goals
 
@@ -52,12 +52,14 @@ The MVP currently includes:
 - Listings are visible to signed-in members, but only their authenticated owner can modify or delete them. Legacy listings remain unowned and are excluded from member views.
 - Session requests are visible only to their learner and listing owner. Learners can update their message; listing owners can update status. Participant identity is assigned by the backend.
 - Reusable permission dependencies protect resource routes. The ownership migration adds nullable fields for existing SQLite and PostgreSQL databases without assigning legacy records to a member.
+- Administrators have a protected dashboard for user and content moderation, managed categories, account and group details, session revocation, and recent audited administrative actions. User bans revoke sessions and are checked on every authenticated request.
+- Administrative actions are stored as structured audit events. User signup cannot grant administrator access; provision administrator roles through a trusted database operation.
 - SQLModel persistence using SQLite by default, with PostgreSQL support through `DATABASE_URL`.
 - A Vite development proxy that forwards `/api` requests to the local backend.
 - FastAPI's interactive API documentation at `/api/docs`.
 - A Vercel configuration for the frontend and backend services.
 
-Group visibility and administrative role management are not implemented. Public signup cannot assign roles; administrative operations belong to a later milestone.
+Public signup cannot assign roles. Admin endpoints independently enforce the administrator permission and prevent self-role changes, self-bans, banning administrator accounts, and demoting the last active administrator.
 
 ## Project documentation
 
@@ -71,7 +73,7 @@ Group visibility and administrative role management are not implemented. Public 
 - **Backend:** FastAPI, Python
 - **Communication:** REST APIs
 - **Authentication:** Argon2 password hashes, JWT access tokens, rotating httpOnly refresh cookies
-- **Authorization:** Ownership and member permissions are implemented; group and administrative permissions remain planned
+- **Authorization:** Ownership, group capabilities, and administrator permissions are enforced by the backend
 - **Database:** SQLite locally; PostgreSQL when configured through `DATABASE_URL`
 
 ## MVP API
@@ -100,6 +102,26 @@ These routes are implemented by the current MVP.
 | `GET` | `/api/users/me/sessions` | List the signed-in member's sessions |
 | `DELETE` | `/api/users/me/sessions/{session_id}` | Revoke one of the member's sessions |
 
+## Administrative API
+
+The admin dashboard is available to signed-in administrator accounts. Its API routes require the backend `admin:manage` permission, regardless of UI visibility.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/overview` | Read platform totals and recent administrative activity |
+| `GET` | `/api/admin/users` | Search, filter, and paginate accounts |
+| `GET` | `/api/admin/users/{user_id}` | View an account's listings, requests, groups, sessions, and activity |
+| `PATCH` | `/api/admin/users/{user_id}/role` | Change a user's role |
+| `POST` | `/api/admin/users/{user_id}/ban` | Ban an account with a reason and revoke its sessions |
+| `POST` | `/api/admin/users/{user_id}/unban` | Restore a banned account |
+| `POST` | `/api/admin/users/bulk-ban` | Ban multiple accounts with a reason |
+| `POST` | `/api/admin/users/bulk-unban` | Unban multiple accounts |
+| `POST` | `/api/admin/users/{user_id}/revoke-sessions` | Revoke all active sessions for an account |
+| `GET` | `/api/admin/listings`, `/api/admin/groups` | Filter and paginate platform content |
+| `DELETE` | `/api/admin/listings/{listing_id}`, `/api/admin/groups/{group_id}` | Remove a listing or group |
+| `GET`, `POST`, `PATCH`, `DELETE` | `/api/admin/categories` | Manage skill categories |
+| `GET` | `/api/admin/activity` | Read recent administrative audit events |
+
 ## Authorization scope examples
 
 The backend may use scopes such as:
@@ -112,7 +134,7 @@ The backend may use scopes such as:
 - `requests:update:participant` — update your own message or the status of your listing's request
 - `requests:delete:participant` — delete a request where you are a participant
 
-These scopes are enforced by reusable FastAPI permission dependencies. Resource ownership and participation are checked in addition to the permission scope. Moderation and user-management scopes are future work.
+These scopes are enforced by reusable FastAPI permission dependencies. Resource ownership and participation are checked in addition to the permission scope. Administrative routes additionally require the `admin:manage` scope.
 
 ## Local development
 
@@ -196,6 +218,6 @@ Authenticated listing discovery and participant-scoped request data are implemen
 
 - Keep secrets out of source control and load them from environment variables (for example, `DATABASE_URL`, `JWT_SECRET_KEY`, and `CORS_ORIGINS`).
 - Validate required configuration when the backend starts.
-- Add group visibility and administrative role management without weakening backend ownership checks.
+- Continue extending the reusable audit event model for authentication, content, and session activity without weakening backend ownership checks.
 - Store passwords using an established password-hashing method.
 - Give each role only the permissions it needs.
