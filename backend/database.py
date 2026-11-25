@@ -5,6 +5,8 @@ from pathlib import Path
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 
+from migrations import migrate_resource_ownership
+
 
 def _database_url() -> str:
     database_url = os.getenv("DATABASE_URL")
@@ -43,6 +45,7 @@ if IS_SQLITE:
 
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
+    migrate_resource_ownership(engine)
 
 
 def get_session() -> Generator[Session, None, None]:

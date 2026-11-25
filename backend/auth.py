@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Field, Session, SQLModel, select
 
 from database import get_session
+from permissions import ROLE_MEMBER
 
 ACCESS_TOKEN_MINUTES = 15
 REFRESH_TOKEN_DAYS = 14
@@ -91,7 +92,7 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True, max_length=254)
     display_name: str = Field(max_length=80)
     password_hash: str
-    role: str = Field(default="user", max_length=20, index=True)
+    role: str = Field(default=ROLE_MEMBER, max_length=20, index=True)
     is_active: bool = Field(default=True, index=True)
     failed_login_attempts: int = Field(default=0)
     locked_until: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))

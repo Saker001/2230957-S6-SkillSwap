@@ -2,7 +2,7 @@
 
 SkillSwap is a peer-to-peer learning platform where members can share skills they teach, find skills they want to learn, and arrange learning sessions.
 
-> **Project status:** Skill and session-request CRUD plus account authentication are implemented. Fine-grained ownership/RBAC, groups, and the admin dashboard are the next milestones.
+> **Project status:** Skill and session-request CRUD, account authentication, ownership checks, and backend RBAC are implemented. Groups and the admin dashboard are later milestones.
 
 ## Project goals
 
@@ -49,12 +49,15 @@ The MVP currently includes:
 - Account signup, login/logout, profile editing, password changes, and session revocation.
 - Argon2 password hashing with a server-side pepper, short-lived JWT access tokens, and rotating httpOnly refresh cookies.
 - Protected API routes reject missing, invalid, expired, revoked, or inactive-user sessions.
+- Listings are visible to signed-in members, but only their authenticated owner can modify or delete them. Legacy listings remain unowned and are excluded from member views.
+- Session requests are visible only to their learner and listing owner. Learners can update their message; listing owners can update status. Participant identity is assigned by the backend.
+- Reusable permission dependencies protect resource routes. The ownership migration adds nullable fields for existing SQLite and PostgreSQL databases without assigning legacy records to a member.
 - SQLModel persistence using SQLite by default, with PostgreSQL support through `DATABASE_URL`.
 - A Vite development proxy that forwards `/api` requests to the local backend.
 - FastAPI's interactive API documentation at `/api/docs`.
 - A Vercel configuration for the frontend and backend services.
 
-The current authentication milestone protects API access but does not yet enforce record ownership or provide admin/group permissions. Until the next RBAC milestone is complete, signed-in accounts can still see shared SkillSwap records. Do not enter private data.
+Group visibility and administrative role management are not implemented. Public signup cannot assign roles; administrative operations belong to a later milestone.
 
 ## Project documentation
 
@@ -68,7 +71,7 @@ The current authentication milestone protects API access but does not yet enforc
 - **Backend:** FastAPI, Python
 - **Communication:** REST APIs
 - **Authentication:** Argon2 password hashes, JWT access tokens, rotating httpOnly refresh cookies
-- **Authorization:** Ownership, group permissions, and administrative roles are in progress
+- **Authorization:** Ownership and member permissions are implemented; group and administrative permissions remain planned
 - **Database:** SQLite locally; PostgreSQL when configured through `DATABASE_URL`
 
 ## MVP API
@@ -105,11 +108,11 @@ The backend may use scopes such as:
 - `skills:create` — create a listing
 - `skills:update:own` — update your own listings
 - `requests:create` — create a session request
-- `requests:respond` — respond to a request
-- `reports:review` — review reported content
-- `users:manage` — administer user accounts
+- `requests:read:participant` — read requests where you are learner or listing owner
+- `requests:update:participant` — update your own message or the status of your listing's request
+- `requests:delete:participant` — delete a request where you are a participant
 
-These are examples; final scope names should match the authorization implementation.
+These scopes are enforced by reusable FastAPI permission dependencies. Resource ownership and participation are checked in addition to the permission scope. Moderation and user-management scopes are future work.
 
 ## Local development
 
@@ -189,10 +192,10 @@ The repository includes a `vercel.json` configuration for deploying the frontend
 
 ## Configuration and security
 
-The MVP does not yet implement authentication or authorization. Its listing and request data is shared; do not use it to store private or sensitive information. As Beta security features are added:
+Authenticated listing discovery and participant-scoped request data are implemented. Unowned legacy records are preserved but hidden from member views until reviewed. As later Beta features are added:
 
 - Keep secrets out of source control and load them from environment variables (for example, `DATABASE_URL`, `JWT_SECRET_KEY`, and `CORS_ORIGINS`).
 - Validate required configuration when the backend starts.
-- Enforce permissions and listing ownership in the backend, not only in the frontend.
+- Add group visibility and administrative role management without weakening backend ownership checks.
 - Store passwords using an established password-hashing method.
 - Give each role only the permissions it needs.

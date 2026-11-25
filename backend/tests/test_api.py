@@ -8,7 +8,8 @@ from pathlib import Path
 
 import jwt
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, select
+from sqlalchemy import text
+from sqlmodel import Session, SQLModel, create_engine, select
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
@@ -20,6 +21,7 @@ os.environ["PASSWORD_PEPPER"] = "test-only-password-pepper-not-for-deployments"
 
 from database import engine  # noqa: E402
 from auth import JWT_ISSUER, JWT_SECRET_KEY, RefreshSession, User  # noqa: E402
+from migrations import migrate_resource_ownership  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -47,19 +49,41 @@ class SkillSwapApiTests(unittest.TestCase):
         )
         self.assertEqual(login.status_code, 200, login.text)
         self.access_token = login.json()["access_token"]
+        self.user_id = login.json()["user"]["id"]
         self.client.headers.update({"Authorization": f"Bearer {self.access_token}"})
 
     def tearDown(self) -> None:
         self.client.close()
 
-    def create_skill(self) -> dict:
-        response = self.client.post(
+    def create_member(self) -> tuple[TestClient, dict]:
+        client = TestClient(app)
+        email = f"member-{uuid.uuid4()}@example.com"
+        signup = client.post(
+            "/api/auth/signup",
+            json={
+                "email": email,
+                "display_name": "Casey",
+                "password": "correct horse battery staple",
+            },
+        )
+        self.assertEqual(signup.status_code, 201, signup.text)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "password": "correct horse battery staple"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        client.headers.update({"Authorization": f"Bearer {login.json()['access_token']}"})
+        return client, login.json()["user"]
+
+    def create_skill(self, client: TestClient | None = None, **extra) -> dict:
+        response = (client or self.client).post(
             "/api/skills",
             json={
                 "teacher_name": "Ari",
                 "title": "Beginner guitar",
                 "description": "Learn basic chords.",
                 "category": "Music",
+                **extra,
             },
         )
         self.assertEqual(response.status_code, 201)
@@ -82,6 +106,27 @@ class SkillSwapApiTests(unittest.TestCase):
         deleted = self.client.delete(f"/api/skills/{skill_id}")
         self.assertEqual(deleted.status_code, 204)
         self.assertEqual(self.client.get(f"/api/skills/{skill_id}").status_code, 404)
+
+    def test_skill_listing_reads_are_shared_but_writes_are_owner_only(self) -> None:
+        skill = self.create_skill(owner_id=99999)
+        self.assertEqual(skill["owner_id"], self.user_id)
+        other_client, _other_user = self.create_member()
+        try:
+            self.assertEqual(other_client.get("/api/skills").json()[0]["id"], skill["id"])
+            self.assertEqual(other_client.get(f"/api/skills/{skill['id']}").status_code, 200)
+            self.assertEqual(
+                other_client.patch(
+                    f"/api/skills/{skill['id']}",
+                    json={"title": "Hijacked listing"},
+                ).status_code,
+                404,
+            )
+            self.assertEqual(
+                other_client.delete(f"/api/skills/{skill['id']}").status_code,
+                404,
+            )
+        finally:
+            other_client.close()
 
     def test_skill_create_validates_required_fields(self) -> None:
         response = self.client.post(
@@ -302,40 +347,77 @@ class SkillSwapApiTests(unittest.TestCase):
 
     def test_session_request_crud_and_skill_delete_cascade(self) -> None:
         skill = self.create_skill()
-        response = self.client.post(
+        learner, learner_user = self.create_member()
+        response = learner.post(
             "/api/session-requests",
             json={
                 "skill_listing_id": skill["id"],
-                "learner_name": "Sam",
+                "learner_name": "Impersonated name",
+                "learner_id": self.user_id,
                 "message": "I want to learn chords.",
             },
         )
         self.assertEqual(response.status_code, 201)
         request_id = response.json()["id"]
         self.assertEqual(response.json()["status"], "pending")
+        self.assertEqual(response.json()["learner_id"], learner_user["id"])
+        self.assertEqual(response.json()["learner_name"], "Casey")
 
         self.assertEqual(self.client.get("/api/session-requests").json()[0]["id"], request_id)
+        self.assertEqual(learner.get("/api/session-requests").json()[0]["id"], request_id)
         self.assertEqual(
-            self.client.get(f"/api/session-requests/{request_id}").json()["learner_name"],
-            "Sam",
+            learner.get(f"/api/session-requests/{request_id}").json()["learner_name"],
+            "Casey",
         )
 
-        updated = self.client.patch(
+        updated = learner.patch(
             f"/api/session-requests/{request_id}",
-            json={"status": "accepted", "message": "I am available weekends."},
+            json={"message": "I am available weekends."},
         )
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json()["status"], "accepted")
         self.assertEqual(updated.json()["message"], "I am available weekends.")
+        self.assertEqual(
+            learner.patch(
+                f"/api/session-requests/{request_id}",
+                json={"status": "accepted"},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.patch(
+                f"/api/session-requests/{request_id}",
+                json={"message": "Owner cannot change learner message."},
+            ).status_code,
+            403,
+        )
+        owner_update = self.client.patch(
+            f"/api/session-requests/{request_id}",
+            json={"status": "accepted"},
+        )
+        self.assertEqual(owner_update.status_code, 200)
+        self.assertEqual(owner_update.json()["status"], "accepted")
 
-        self.assertEqual(self.client.delete(f"/api/session-requests/{request_id}").status_code, 204)
+        outsider, _ = self.create_member()
+        try:
+            self.assertEqual(outsider.get("/api/session-requests").json(), [])
+            self.assertEqual(
+                outsider.get(f"/api/session-requests/{request_id}").status_code,
+                404,
+            )
+            self.assertEqual(
+                outsider.delete(f"/api/session-requests/{request_id}").status_code,
+                404,
+            )
+        finally:
+            outsider.close()
+
+        self.assertEqual(learner.delete(f"/api/session-requests/{request_id}").status_code, 204)
         self.assertEqual(self.client.get(f"/api/session-requests/{request_id}").status_code, 404)
 
-        another_request = self.client.post(
+        another_request = learner.post(
             "/api/session-requests",
             json={
                 "skill_listing_id": skill["id"],
-                "learner_name": "Jamie",
                 "message": "I want to learn.",
             },
         )
@@ -347,6 +429,55 @@ class SkillSwapApiTests(unittest.TestCase):
             ).status_code,
             404,
         )
+        learner.close()
+
+    def test_legacy_records_migrate_without_being_claimed(self) -> None:
+        legacy_engine = create_engine("sqlite://")
+        try:
+            with legacy_engine.begin() as connection:
+                connection.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY)"))
+                connection.execute(
+                    text(
+                        "CREATE TABLE skill_listings ("
+                        "id INTEGER PRIMARY KEY, teacher_name TEXT NOT NULL, "
+                        "title TEXT NOT NULL, description TEXT NOT NULL, "
+                        "category TEXT NOT NULL, created_at DATETIME NOT NULL)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "CREATE TABLE session_requests ("
+                        "id INTEGER PRIMARY KEY, skill_listing_id INTEGER NOT NULL, "
+                        "learner_name TEXT NOT NULL, message TEXT NOT NULL, "
+                        "status TEXT NOT NULL, created_at DATETIME NOT NULL)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO skill_listings VALUES "
+                        "(1, 'Legacy teacher', 'Legacy skill', 'Description', 'Music', '2025-01-01')"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO session_requests VALUES "
+                        "(1, 1, 'Legacy learner', 'Message', 'pending', '2025-01-02')"
+                    )
+                )
+
+            migrate_resource_ownership(legacy_engine)
+            migrate_resource_ownership(legacy_engine)
+            with legacy_engine.connect() as connection:
+                skill = connection.execute(
+                    text("SELECT title, owner_id FROM skill_listings WHERE id = 1")
+                ).one()
+                request = connection.execute(
+                    text("SELECT message, learner_id FROM session_requests WHERE id = 1")
+                ).one()
+            self.assertEqual(skill, ("Legacy skill", None))
+            self.assertEqual(request, ("Message", None))
+        finally:
+            legacy_engine.dispose()
 
     def test_request_rejects_missing_skill_and_invalid_status(self) -> None:
         missing_skill = self.client.post(
@@ -359,7 +490,20 @@ class SkillSwapApiTests(unittest.TestCase):
         )
         self.assertEqual(missing_skill.status_code, 404)
 
-        skill = self.create_skill()
+        own_skill = self.create_skill()
+        self.assertEqual(
+            self.client.post(
+                "/api/session-requests",
+                json={
+                    "skill_listing_id": own_skill["id"],
+                    "message": "I want to learn.",
+                },
+            ).status_code,
+            403,
+        )
+
+        owner, _owner_user = self.create_member()
+        skill = self.create_skill(owner)
         created = self.client.post(
             "/api/session-requests",
             json={
@@ -368,6 +512,7 @@ class SkillSwapApiTests(unittest.TestCase):
                 "message": "I want to learn.",
             },
         )
+        owner.close()
         invalid_status = self.client.patch(
             f"/api/session-requests/{created.json()['id']}",
             json={"status": "scheduled"},

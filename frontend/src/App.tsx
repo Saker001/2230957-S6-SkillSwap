@@ -10,7 +10,6 @@ const emptySkill = {
 
 const emptyRequest = {
   skill_listing_id: "",
-  learner_name: "",
   message: "",
   status: "pending" as SessionRequest["status"],
 }
@@ -45,6 +44,14 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
+  const editingRequest = sessionRequests.find((request) => request.id === editingRequestId)
+  const editingRequestIsOwner =
+    editingRequest !== undefined &&
+    skills.some(
+      (skill) =>
+        skill.id === editingRequest.skill_listing_id && skill.owner_id === user?.id,
+    )
+  const editingRequestIsLearner = editingRequest?.learner_id === user?.id
 
   useEffect(() => {
     let active = true
@@ -204,16 +211,19 @@ export default function App() {
     try {
       const data = {
         skill_listing_id: Number(requestForm.skill_listing_id),
-        learner_name: requestForm.learner_name,
         message: requestForm.message,
       }
       if (editingRequestId === null) {
         await api.createSessionRequest(data)
         setNotice("Session request created.")
+      } else if (editingRequestIsOwner) {
+        await api.updateSessionRequest(editingRequestId, {
+          status: requestForm.status,
+        })
+        setNotice("Session request status updated.")
       } else {
         await api.updateSessionRequest(editingRequestId, {
-          ...data,
-          status: requestForm.status,
+          message: requestForm.message,
         })
         setNotice("Session request updated.")
       }
@@ -258,7 +268,6 @@ export default function App() {
     setEditingRequestId(request.id)
     setRequestForm({
       skill_listing_id: String(request.skill_listing_id),
-      learner_name: request.learner_name,
       message: request.message,
       status: request.status,
     })
@@ -493,8 +502,12 @@ export default function App() {
                   <p className="item-description">{skill.description}</p>
                   <div className="item-actions">
                     <button className="secondary" onClick={() => showSkill(skill.id)}>Details</button>
-                    <button className="secondary" onClick={() => editSkill(skill)}>Edit</button>
-                    <button className="danger" onClick={() => removeSkill(skill.id)}>Delete</button>
+                    {skill.owner_id === user.id && (
+                      <>
+                        <button className="secondary" onClick={() => editSkill(skill)}>Edit</button>
+                        <button className="danger" onClick={() => removeSkill(skill.id)}>Delete</button>
+                      </>
+                    )}
                   </div>
                 </article>
               ))
@@ -524,8 +537,8 @@ export default function App() {
         </div>
         <div className="content-grid">
           <form className="form-card" onSubmit={handleRequestSubmit}>
-            <h3>{editingRequestId === null ? "Request a session" : "Edit session request"}</h3>
-            <label>
+            <h3>{editingRequestId === null ? "Request a session" : "Manage session request"}</h3>
+            {editingRequestId === null && <label>
               Skill
               <select
                 required
@@ -535,25 +548,16 @@ export default function App() {
                 }
               >
                 <option value="">Choose a listing</option>
-                {skills.map((skill) => (
+                {skills.filter((skill) => skill.owner_id !== user.id).map((skill) => (
                   <option value={skill.id} key={skill.id}>
                     {skill.title} — {skill.teacher_name}
                   </option>
                 ))}
               </select>
-            </label>
-            <label>
-              Your name
-              <input
-                required
-                maxLength={80}
-                value={requestForm.learner_name}
-                onChange={(event) =>
-                  setRequestForm({ ...requestForm, learner_name: event.target.value })
-                }
-                placeholder="e.g. Jamie"
-              />
-            </label>
+            </label>}
+            {editingRequestId === null && skills.every((skill) => skill.owner_id === user.id) && (
+              <p className="muted">No other members' listings are available to request yet.</p>
+            )}
             <label>
               What would you like to learn?
               <textarea
@@ -561,13 +565,14 @@ export default function App() {
                 maxLength={1000}
                 rows={4}
                 value={requestForm.message}
+                disabled={editingRequestId !== null && !editingRequestIsLearner}
                 onChange={(event) =>
                   setRequestForm({ ...requestForm, message: event.target.value })
                 }
                 placeholder="Introduce yourself and share your learning goal."
               />
             </label>
-            {editingRequestId !== null && (
+            {editingRequestId !== null && editingRequestIsOwner && (
               <label>
                 Request status
                 <select
@@ -586,8 +591,20 @@ export default function App() {
               </label>
             )}
             <div className="form-actions">
-              <button className="primary" type="submit" disabled={skills.length === 0}>
-                {editingRequestId === null ? "Send request" : "Save changes"}
+              <button
+                className="primary"
+                type="submit"
+                disabled={
+                  editingRequestId === null
+                    ? skills.every((skill) => skill.owner_id === user.id)
+                    : !editingRequestIsOwner && !editingRequestIsLearner
+                }
+              >
+                {editingRequestId === null
+                  ? "Send request"
+                  : editingRequestIsOwner
+                    ? "Update status"
+                    : "Save message"}
               </button>
               {editingRequestId !== null && (
                 <button
@@ -602,7 +619,9 @@ export default function App() {
                 </button>
               )}
             </div>
-            {skills.length === 0 && <p className="muted">Create a skill listing before requesting a session.</p>}
+            {editingRequestId === null && skills.length === 0 && (
+              <p className="muted">No members' listings are available to request yet.</p>
+            )}
           </form>
 
           <div className="listing-column">
@@ -620,8 +639,20 @@ export default function App() {
                   <p className="item-description">{request.message}</p>
                   <div className="item-actions">
                     <button className="secondary" onClick={() => showRequest(request.id)}>Details</button>
-                    <button className="secondary" onClick={() => editRequest(request)}>Edit</button>
-                    <button className="danger" onClick={() => removeRequest(request.id)}>Delete</button>
+                    {(request.learner_id === user.id ||
+                      skills.some(
+                        (skill) =>
+                          skill.id === request.skill_listing_id && skill.owner_id === user.id,
+                      )) && (
+                      <>
+                        <button className="secondary" onClick={() => editRequest(request)}>
+                          {request.learner_id === user.id ? "Edit message" : "Update status"}
+                        </button>
+                        <button className="danger" onClick={() => removeRequest(request.id)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 </article>
               ))
@@ -727,7 +758,7 @@ export default function App() {
         </div>
       </section>
       <footer>
-        Signed in as {user.email}. Listing ownership and role-based permissions are managed in the next security milestone.
+        Signed in as {user.email}. Listings and session requests are limited to their owners and participants.
       </footer>
     </main>
   )

@@ -1,5 +1,6 @@
 export type SkillListing = {
   id: number
+  owner_id: number | null
   teacher_name: string
   title: string
   description: string
@@ -10,6 +11,7 @@ export type SkillListing = {
 export type SessionRequest = {
   id: number
   skill_listing_id: number
+  learner_id: number | null
   learner_name: string
   message: string
   status: "pending" | "accepted" | "declined"
@@ -169,12 +171,15 @@ export const api = {
   },
   listSkills: () => request<SkillListing[]>("/api/skills"),
   getSkill: (id: number) => request<SkillListing>(`/api/skills/${id}`),
-  createSkill: (data: Omit<SkillListing, "id" | "created_at">) =>
+  createSkill: (data: Omit<SkillListing, "id" | "created_at" | "owner_id">) =>
     request<SkillListing>("/api/skills", {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  updateSkill: (id: number, data: Partial<Omit<SkillListing, "id" | "created_at">>) =>
+  updateSkill: (
+    id: number,
+    data: Partial<Omit<SkillListing, "id" | "created_at" | "owner_id">>,
+  ) =>
     request<SkillListing>(`/api/skills/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -186,7 +191,6 @@ export const api = {
     request<SessionRequest>(`/api/session-requests/${id}`),
   createSessionRequest: (data: {
     skill_listing_id: number
-    learner_name: string
     message: string
   }) =>
     request<SessionRequest>("/api/session-requests", {
@@ -196,7 +200,7 @@ export const api = {
   updateSessionRequest: (
     id: number,
     data: Partial<
-      Pick<SessionRequest, "skill_listing_id" | "learner_name" | "message" | "status">
+      Pick<SessionRequest, "message" | "status">
     >,
   ) =>
     request<SessionRequest>(`/api/session-requests/${id}`, {
