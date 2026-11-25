@@ -563,32 +563,25 @@ export default function App() {
 
   if (!user) {
     return (
-      <main className="app-shell">
-        <header className="hero">
-          <p className="eyebrow">Learn from each other</p>
+      <main className="app-shell auth-shell">
+        <header className="hero auth-hero">
           <h1>SkillSwap</h1>
-          <p className="intro">Sign in or create an account to continue.</p>
+          <p className="intro">Learn from each other</p>
         </header>
-        {error && <p className="alert error" role="alert">{error}</p>}
-        {notice && <p className="alert success" role="status">{notice}</p>}
         <section className="panel auth-panel" aria-labelledby="auth-heading">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Your account</p>
               <h2 id="auth-heading">{authMode === "login" ? "Sign in" : "Create account"}</h2>
+              <p className="auth-description">
+                {authMode === "login"
+                  ? "Welcome back. Sign in to continue learning."
+                  : "Join SkillSwap and start sharing what you know."}
+              </p>
             </div>
-            <button
-              className="secondary"
-              type="button"
-              onClick={() => {
-                setAuthMode(authMode === "login" ? "signup" : "login")
-                setError("")
-              }}
-            >
-              {authMode === "login" ? "Create account" : "I already have an account"}
-            </button>
           </div>
-          <form className="form-card" onSubmit={handleAuthSubmit}>
+          {error && <p className="alert error" role="alert">{error}</p>}
+          {notice && <p className="alert success" role="status">{notice}</p>}
+          <form className="form-card auth-form" onSubmit={handleAuthSubmit}>
             {authMode === "signup" && (
               <label>
                 Display name
@@ -633,6 +626,23 @@ export default function App() {
               {authMode === "login" ? "Sign in" : "Create account"}
             </button>
           </form>
+          <div className="auth-switch">
+            <span>
+              {authMode === "login"
+                ? "New to SkillSwap?"
+                : "Already have an account?"}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode(authMode === "login" ? "signup" : "login")
+                setError("")
+                setNotice("")
+              }}
+            >
+              {authMode === "login" ? "Create an account" : "Sign in"}
+            </button>
+          </div>
         </section>
       </main>
     )
