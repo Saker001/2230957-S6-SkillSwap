@@ -2,7 +2,7 @@
 
 SkillSwap is a peer-to-peer learning platform where members can share skills they teach, find skills they want to learn, and arrange learning sessions.
 
-> **Project status:** Skill and session-request CRUD, account authentication, ownership checks, groups, and the admin dashboard are implemented.
+> **Project status:** Skill and session-request CRUD, account authentication, ownership checks, groups, and the admin dashboard are implemented, including security auditing and filtered CSV exports.
 
 ## Project goals
 
@@ -52,8 +52,9 @@ The MVP currently includes:
 - Listings are visible to signed-in members, but only their authenticated owner can modify or delete them. Legacy listings remain unowned and are excluded from member views.
 - Session requests are visible only to their learner and listing owner. Learners can update their message; listing owners can update status. Participant identity is assigned by the backend.
 - Reusable permission dependencies protect resource routes. The ownership migration adds nullable fields for existing SQLite and PostgreSQL databases without assigning legacy records to a member.
-- Administrators have a protected dashboard for user and content moderation, managed categories, account and group details, session revocation, and recent audited administrative actions. User bans revoke sessions and are checked on every authenticated request.
-- Administrative actions are stored as structured audit events. User signup cannot grant administrator access; provision administrator roles through a trusted database operation.
+- Administrators have a protected dashboard for user and content moderation, managed categories, account and group details, session revocation, searchable activity, failed-login insights, and filtered CSV exports.
+- Audit events record authentication outcomes, password changes, moderation, content deletion, session revocation, and exports with client IP and user-agent metadata. Export columns are explicitly selected and exclude password hashes and tokens.
+- User signup cannot grant administrator access; provision administrator roles through a trusted database operation.
 - SQLModel persistence using SQLite by default, with PostgreSQL support through `DATABASE_URL`.
 - A Vite development proxy that forwards `/api` requests to the local backend.
 - FastAPI's interactive API documentation at `/api/docs`.
@@ -120,7 +121,9 @@ The admin dashboard is available to signed-in administrator accounts. Its API ro
 | `GET` | `/api/admin/listings`, `/api/admin/groups` | Filter and paginate platform content |
 | `DELETE` | `/api/admin/listings/{listing_id}`, `/api/admin/groups/{group_id}` | Remove a listing or group |
 | `GET`, `POST`, `PATCH`, `DELETE` | `/api/admin/categories` | Manage skill categories |
-| `GET` | `/api/admin/activity` | Read recent administrative audit events |
+| `GET` | `/api/admin/activity` | Search and filter audit events by text, action, actor, target, or time |
+| `GET` | `/api/admin/security/failed-logins` | Review failed-login counts by client IP and account |
+| `GET` | `/api/admin/exports/users.csv`, `/api/admin/exports/records.csv`, `/api/admin/exports/activity.csv` | Download CSV data using the selected filters |
 
 ## Authorization scope examples
 

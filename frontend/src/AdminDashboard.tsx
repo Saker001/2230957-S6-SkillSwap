@@ -6,12 +6,13 @@ import {
   type AdminPage,
   type AdminUser,
   type AdminUserDetail,
+  type FailedLoginSummary,
   type SkillCategory,
   type SkillGroup,
   type SkillListing,
 } from "./api"
 
-type Section = "overview" | "users" | "listings" | "groups" | "categories"
+type Section = "overview" | "users" | "listings" | "groups" | "categories" | "activity" | "security"
 
 const pageSize = 25
 
@@ -20,7 +21,7 @@ function formatDate(value: string) {
 }
 
 function ActivityList({ events }: { events: AdminAuditEvent[] }) {
-  if (events.length === 0) return <p className="muted">No administrative activity yet.</p>
+  if (events.length === 0) return <p className="muted">No activity matches these filters.</p>
   return (
     <div className="admin-activity">
       {events.map((event) => (
@@ -33,6 +34,7 @@ function ActivityList({ events }: { events: AdminAuditEvent[] }) {
             {typeof event.details.reason === "string" && (
               <p className="muted">Reason: {event.details.reason}</p>
             )}
+            <p className="muted">Client {event.ip_address ?? "Unknown IP"} · {event.user_agent ?? "Unknown device"}</p>
           </div>
           <time className="muted" dateTime={event.created_at}>{formatDate(event.created_at)}</time>
         </article>
@@ -52,6 +54,14 @@ export default function AdminDashboard({ onExit }: { onExit: () => void }) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [queryInput, setQueryInput] = useState("")
   const [query, setQuery] = useState("")
+  const [activitySearchInput, setActivitySearchInput] = useState("")
+  const [activitySearch, setActivitySearch] = useState("")
+  const [activityAction, setActivityAction] = useState("")
+  const [activityEvents, setActivityEvents] = useState<AdminAuditEvent[]>([])
+  const [activityOffset, setActivityOffset] = useState(0)
+  const [securitySearchInput, setSecuritySearchInput] = useState("")
+  const [securitySearch, setSecuritySearch] = useState("")
+  const [securitySummary, setSecuritySummary] = useState<FailedLoginSummary | null>(null)
   const [roleFilter, setRoleFilter] = useState("")
   const [banFilter, setBanFilter] = useState("")
   const [categoryFilter, setCategoryFilter] = useState("")
@@ -118,10 +128,52 @@ export default function AdminDashboard({ onExit }: { onExit: () => void }) {
     return () => { active = false }
   }, [section, revision])
 
+  useEffect(() => {
+    if (section !== "activity") return
+    let active = true
+    setLoading(true)
+    api.adminActivity({
+      q: activitySearch || undefined,
+      action: activityAction || undefined,
+      limit: pageSize,
+      offset: activityOffset,
+    })
+      .then((result) => { if (active) setActivityEvents(result) })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Could not load activity.")
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [section, activitySearch, activityAction, activityOffset, revision])
+
+  useEffect(() => {
+    if (section !== "security") return
+    let active = true
+    setLoading(true)
+    api.adminFailedLogins({ q: securitySearch || undefined, limit: 50 })
+      .then((result) => { if (active) setSecuritySummary(result) })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Could not load security insights.")
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [section, securitySearch, revision])
+
   function applySearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setOffset(0)
     setQuery(queryInput.trim())
+  }
+
+  function applyActivitySearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setActivityOffset(0)
+    setActivitySearch(activitySearchInput.trim())
+  }
+
+  function applySecuritySearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSecuritySearch(securitySearchInput.trim())
   }
 
   function toggleSelected(id: number) {
@@ -269,6 +321,14 @@ export default function AdminDashboard({ onExit }: { onExit: () => void }) {
     } catch (reason) { showError(reason) }
   }
 
+  async function handleExport(exporter: () => Promise<void>, label: string) {
+    setError("")
+    try {
+      await exporter()
+      setNotice(`${label} CSV downloaded.`)
+    } catch (reason) { showError(reason) }
+  }
+
   const page = section === "users" ? users : section === "listings" ? listings : groups
   const nav: { id: Section; label: string }[] = [
     { id: "overview", label: "Overview" },
@@ -276,6 +336,8 @@ export default function AdminDashboard({ onExit }: { onExit: () => void }) {
     { id: "listings", label: "Listings" },
     { id: "groups", label: "Groups" },
     { id: "categories", label: "Categories" },
+    { id: "activity", label: "Activity" },
+    { id: "security", label: "Security" },
   ]
 
   return (
@@ -297,6 +359,7 @@ export default function AdminDashboard({ onExit }: { onExit: () => void }) {
             onClick={() => {
               setSection(item.id)
               setOffset(0)
+              setActivityOffset(0)
               setError("")
               setNotice("")
             }}
@@ -335,6 +398,32 @@ export default function AdminDashboard({ onExit }: { onExit: () => void }) {
 
       {(section === "users" || section === "listings" || section === "groups") && (
         <>
+          {(section === "users" || section === "listings") && (
+            <div className="admin-bulk-actions">
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => section === "users"
+                  ? handleExport(
+                      () => api.adminExportUsers({
+                        q: query || undefined,
+                        role: roleFilter || undefined,
+                        banned: banFilter === "" ? null : banFilter === "banned",
+                      }),
+                      "Users",
+                    )
+                  : handleExport(
+                      () => api.adminExportRecords({
+                        q: query || undefined,
+                        category: categoryFilter || undefined,
+                      }),
+                      "Records",
+                    )}
+              >
+                Export filtered CSV
+              </button>
+            </div>
+          )}
           <form className="admin-filters" onSubmit={applySearch}>
             <label>
               Search
@@ -489,6 +578,140 @@ export default function AdminDashboard({ onExit }: { onExit: () => void }) {
             </article>
           ))}
           {categories.length === 0 && !loading && <div className="empty-state">No managed categories yet.</div>}
+        </div>
+      )}
+
+      {section === "activity" && (
+        <div className="admin-subsection">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Audit trail</p>
+              <h3>Platform activity</h3>
+            </div>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => handleExport(
+                () => api.adminExportActivity({
+                  q: activitySearch || undefined,
+                  action: activityAction || undefined,
+                }),
+                "Activity",
+              )}
+            >
+              Export filtered CSV
+            </button>
+          </div>
+          <form className="admin-filters" onSubmit={applyActivitySearch}>
+            <label>
+              Search activity
+              <input
+                value={activitySearchInput}
+                onChange={(event) => setActivitySearchInput(event.target.value)}
+                placeholder="Action, account, IP, or user agent"
+              />
+            </label>
+            <label>
+              Event
+              <select value={activityAction} onChange={(event) => {
+                setActivityAction(event.target.value)
+                setActivityOffset(0)
+              }}>
+                <option value="">All events</option>
+                <option value="auth.login_failed">Failed login</option>
+                <option value="auth.login_succeeded">Successful login</option>
+                <option value="auth.logout">Logout</option>
+                <option value="auth.password_changed">Password changed</option>
+                <option value="user.role_changed">Role changed</option>
+                <option value="user.banned">User banned</option>
+                <option value="user.unbanned">User unbanned</option>
+                <option value="content.deleted">Content deleted</option>
+                <option value="user.session_revoked">Session revoked</option>
+                <option value="export.users">Users exported</option>
+                <option value="export.records">Records exported</option>
+                <option value="export.activity">Activity exported</option>
+              </select>
+            </label>
+            <button className="primary" type="submit">Search</button>
+          </form>
+          <ActivityList events={activityEvents} />
+          <div className="admin-pagination">
+            <span className="muted">Showing {activityEvents.length} events</span>
+            <div className="item-actions">
+              <button
+                className="secondary"
+                type="button"
+                disabled={activityOffset === 0 || loading}
+                onClick={() => setActivityOffset(Math.max(activityOffset - pageSize, 0))}
+              >
+                Previous
+              </button>
+              <button
+                className="secondary"
+                type="button"
+                disabled={activityEvents.length < pageSize || loading}
+                onClick={() => setActivityOffset(activityOffset + pageSize)}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {section === "security" && (
+        <div className="admin-subsection">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Authentication signals</p>
+              <h3>Failed login insights</h3>
+            </div>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => handleExport(
+                () => api.adminExportActivity({
+                  q: securitySearch || undefined,
+                  action: "auth.login_failed",
+                }),
+                "Failed login activity",
+              )}
+            >
+              Export filtered CSV
+            </button>
+          </div>
+          <form className="admin-filters" onSubmit={applySecuritySearch}>
+            <label>
+              Filter by IP or account
+              <input
+                value={securitySearchInput}
+                onChange={(event) => setSecuritySearchInput(event.target.value)}
+                placeholder="IP address or email"
+              />
+            </label>
+            <button className="primary" type="submit">Filter</button>
+          </form>
+          <div className="content-grid">
+            {([
+              ["By IP address", securitySummary?.by_ip ?? []],
+              ["By account", securitySummary?.by_account ?? []],
+            ] as const).map(([title, insights]) => (
+              <div className="admin-detail-block" key={title}>
+                <h4>{title}</h4>
+                {insights.map((insight) => (
+                  <article className="admin-record" key={insight.value}>
+                    <div className="admin-record-main">
+                      <strong>{insight.value}</strong>
+                      <span className="muted">
+                        {insight.count} failed attempt{insight.count === 1 ? "" : "s"} · Latest {formatDate(insight.last_seen)}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+                {insights.length === 0 && !loading && <p className="muted">No failed logins match this filter.</p>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

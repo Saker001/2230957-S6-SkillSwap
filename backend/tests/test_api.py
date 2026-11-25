@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 import sys
 import tempfile
@@ -20,8 +22,13 @@ os.environ["JWT_SECRET_KEY"] = "test-only-jwt-secret-key-not-for-deployments"
 os.environ["PASSWORD_PEPPER"] = "test-only-password-pepper-not-for-deployments"
 
 from database import engine  # noqa: E402
+from audit import AuditEvent  # noqa: E402
 from auth import JWT_ISSUER, JWT_SECRET_KEY, RefreshSession, User  # noqa: E402
-from migrations import migrate_admin_user_fields, migrate_resource_ownership  # noqa: E402
+from migrations import (  # noqa: E402
+    migrate_admin_user_fields,
+    migrate_audit_event_client_metadata,
+    migrate_resource_ownership,
+)
 from permissions import ROLE_ADMIN  # noqa: E402
 from main import app  # noqa: E402
 
@@ -440,10 +447,160 @@ class SkillSwapApiTests(unittest.TestCase):
 
     def test_admin_routes_are_denied_to_members_and_guests(self) -> None:
         anonymous = TestClient(app)
-        for path in ("/api/admin/overview", "/api/admin/users", "/api/admin/categories"):
+        for path in (
+            "/api/admin/overview",
+            "/api/admin/users",
+            "/api/admin/categories",
+            "/api/admin/activity",
+            "/api/admin/security/failed-logins",
+            "/api/admin/exports/users.csv",
+            "/api/admin/exports/records.csv",
+            "/api/admin/exports/activity.csv",
+        ):
             self.assertEqual(self.client.get(path).status_code, 403)
             self.assertEqual(anonymous.get(path).status_code, 401)
         anonymous.close()
+
+    def test_authentication_audit_metadata_and_failed_login_insights(self) -> None:
+        missing_email = f"missing-{uuid.uuid4()}@example.com"
+        anonymous = TestClient(app, client=("203.0.113.45", 4300))
+        try:
+            failed = anonymous.post(
+                "/api/auth/login",
+                json={"email": missing_email, "password": "do-not-store-this-password"},
+                headers={"User-Agent": "AuditTest/1.0"},
+            )
+            self.assertEqual(failed.status_code, 401)
+
+            self.promote_to_admin()
+            filtered = self.client.get(
+                "/api/admin/activity",
+                params={"action": "auth.login_failed", "q": missing_email},
+            )
+            self.assertEqual(filtered.status_code, 200, filtered.text)
+            self.assertEqual(len(filtered.json()), 1)
+            event = filtered.json()[0]
+            self.assertIsNone(event["actor_id"])
+            self.assertEqual(event["target_id"], missing_email)
+            self.assertEqual(event["ip_address"], "203.0.113.45")
+            self.assertEqual(event["user_agent"], "AuditTest/1.0")
+            self.assertNotIn("do-not-store-this-password", event["details"])
+
+            insights = self.client.get(
+                "/api/admin/security/failed-logins",
+                params={"q": missing_email},
+            )
+            self.assertEqual(insights.status_code, 200, insights.text)
+            self.assertEqual(insights.json()["by_account"][0]["value"], missing_email)
+            self.assertEqual(insights.json()["by_account"][0]["count"], 1)
+            self.assertEqual(insights.json()["by_ip"][0]["value"], "203.0.113.45")
+
+            member_client, member = self.create_member()
+            try:
+                self.assertEqual(member_client.post("/api/auth/logout").status_code, 204)
+                revoked_client, revoked_user = self.create_member()
+                try:
+                    session_id = revoked_client.get("/api/users/me/sessions").json()[0]["id"]
+                    self.assertEqual(
+                        revoked_client.delete(f"/api/users/me/sessions/{session_id}").status_code,
+                        204,
+                    )
+                finally:
+                    revoked_client.close()
+            finally:
+                member_client.close()
+
+            changed = self.client.post(
+                "/api/users/me/password",
+                json={
+                    "current_password": "correct horse battery staple",
+                    "new_password": "new secure test password",
+                },
+                headers={"User-Agent": "PasswordChangeTest/1.0"},
+            )
+            self.assertEqual(changed.status_code, 204, changed.text)
+            with Session(engine) as database_session:
+                actions = set(
+                    database_session.exec(
+                        select(AuditEvent.action).where(
+                            AuditEvent.action.in_(
+                                [
+                                    "auth.login_succeeded",
+                                    "auth.logout",
+                                    "auth.password_changed",
+                                    "user.session_revoked",
+                                ]
+                            )
+                        )
+                    ).all()
+                )
+                self.assertTrue(
+                    {
+                        "auth.login_succeeded",
+                        "auth.logout",
+                        "auth.password_changed",
+                        "user.session_revoked",
+                    }.issubset(actions)
+                )
+                failed_event = database_session.exec(
+                    select(AuditEvent).where(AuditEvent.target_id == missing_email)
+                ).one()
+                self.assertNotIn("do-not-store-this-password", failed_event.details)
+                self.assertNotIn("token", failed_event.details.lower())
+        finally:
+            anonymous.close()
+
+    def test_admin_csv_exports_preserve_filters_and_exclude_credentials(self) -> None:
+        self.promote_to_admin()
+        member_client, member = self.create_member()
+        try:
+            matching = self.create_skill(title="Guitar lessons", category="Music")
+            self.create_skill(title="Painting class", category="Art")
+
+            users_export = self.client.get(
+                "/api/admin/exports/users.csv",
+                params={"q": member["email"], "role": "user", "banned": "false"},
+            )
+            self.assertEqual(users_export.status_code, 200, users_export.text)
+            user_rows = list(csv.reader(io.StringIO(users_export.text)))
+            self.assertEqual(user_rows[0], [
+                "id", "email", "display_name", "role", "is_active", "is_banned", "created_at",
+            ])
+            self.assertEqual([row[1] for row in user_rows[1:]], [member["email"]])
+            self.assertNotIn("password_hash", users_export.text)
+            self.assertNotIn("token_hash", users_export.text)
+            self.assertNotIn("correct horse battery staple", users_export.text)
+
+            records_export = self.client.get(
+                "/api/admin/exports/records.csv",
+                params={"q": "Guitar", "category": "Music"},
+            )
+            self.assertEqual(records_export.status_code, 200, records_export.text)
+            record_rows = list(csv.reader(io.StringIO(records_export.text)))
+            self.assertEqual([int(row[0]) for row in record_rows[1:]], [matching["id"]])
+
+            failed_email = f"export-{uuid.uuid4()}@example.com"
+            self.client.post(
+                "/api/auth/login",
+                json={"email": failed_email, "password": "not-a-password"},
+            )
+            activity_export = self.client.get(
+                "/api/admin/exports/activity.csv",
+                params={"action": "auth.login_failed", "q": failed_email},
+            )
+            self.assertEqual(activity_export.status_code, 200, activity_export.text)
+            activity_rows = list(csv.reader(io.StringIO(activity_export.text)))
+            self.assertEqual(len(activity_rows), 2)
+            self.assertEqual(activity_rows[1][2], "auth.login_failed")
+            self.assertEqual(activity_rows[1][4], failed_email)
+
+            filtered_activity = self.client.get(
+                "/api/admin/activity",
+                params={"action": "auth.login_failed", "q": failed_email},
+            )
+            self.assertEqual(len(filtered_activity.json()), 1)
+        finally:
+            member_client.close()
 
     def test_admin_user_controls_enforce_safety_bans_and_audit(self) -> None:
         member_client, member = self.create_member()
@@ -949,6 +1106,42 @@ class SkillSwapApiTests(unittest.TestCase):
                 ).one()
             self.assertEqual(skill, ("Legacy skill", None))
             self.assertEqual(request, ("Message", None))
+        finally:
+            legacy_engine.dispose()
+
+    def test_audit_metadata_migration_is_repeatable(self) -> None:
+        legacy_engine = create_engine("sqlite://")
+        try:
+            with legacy_engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE TABLE audit_events ("
+                        "id INTEGER PRIMARY KEY, actor_id INTEGER, action VARCHAR(80), "
+                        "target_type VARCHAR(40), target_id VARCHAR(80), details VARCHAR(4000), "
+                        "created_at DATETIME)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO audit_events VALUES "
+                        "(1, NULL, 'auth.login_failed', 'account', 'user@example.com', '{}', '2025-01-01')"
+                    )
+                )
+            migrate_audit_event_client_metadata(legacy_engine)
+            migrate_audit_event_client_metadata(legacy_engine)
+            with legacy_engine.connect() as connection:
+                columns = {
+                    column[1]
+                    for column in connection.exec_driver_sql(
+                        "PRAGMA table_info(audit_events)"
+                    )
+                }
+                existing = connection.execute(
+                    text("SELECT action, ip_address, user_agent FROM audit_events WHERE id = 1")
+                ).one()
+            self.assertIn("ip_address", columns)
+            self.assertIn("user_agent", columns)
+            self.assertEqual(existing, ("auth.login_failed", None, None))
         finally:
             legacy_engine.dispose()
 

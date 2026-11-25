@@ -2,12 +2,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from admin import router as admin_router
+from audit import record_admin_action
 from auth import User, router as auth_router
 from authorization import (
     GroupAccess,
@@ -173,10 +174,19 @@ def update_group(
 
 @app.delete("/api/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_group(
+    request: Request,
     access: GroupOwner,
     session: Session = Depends(get_session),
 ) -> Response:
     session.delete(access.group)
+    record_admin_action(
+        session,
+        access.group.owner_id,
+        "content.deleted",
+        "group",
+        access.group.id,
+        request=request,
+    )
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -522,6 +532,7 @@ def update_skill(
 @app.delete("/api/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_skill(
     skill_id: int,
+    request: Request,
     current_user: SkillDeleter,
     session: Session = Depends(get_session),
 ) -> Response:
@@ -535,6 +546,14 @@ def delete_skill(
     if skill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill listing not found")
     session.delete(skill)
+    record_admin_action(
+        session,
+        current_user.id,
+        "content.deleted",
+        "listing",
+        skill_id,
+        request=request,
+    )
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -668,10 +687,11 @@ def update_session_request(
 )
 def delete_session_request(
     request_id: int,
+    request: Request,
     current_user: RequestDeleter,
     session: Session = Depends(get_session),
 ) -> Response:
-    request = session.exec(
+    session_request = session.exec(
         select(SessionRequest)
         .join(SkillListing)
         .where(
@@ -682,9 +702,17 @@ def delete_session_request(
             ),
         )
     ).first()
-    if request is None:
+    if session_request is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session request not found")
-    session.delete(request)
+    session.delete(session_request)
+    record_admin_action(
+        session,
+        current_user.id,
+        "content.deleted",
+        "session_request",
+        request_id,
+        request=request,
+    )
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
