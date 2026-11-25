@@ -10,6 +10,8 @@ frontend/dist/
 
 # Env / tooling
 .env
+.env.*
+!.env.example
 .vercel/
 .vscode/*
 !.vscode/extensions.json
