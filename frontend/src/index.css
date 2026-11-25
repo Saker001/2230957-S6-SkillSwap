@@ -76,6 +76,75 @@ button:disabled {
   border-top: 1px solid #e5ece3;
 }
 
+.group-workspace {
+  display: grid;
+  gap: 22px;
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e5ece3;
+}
+
+.group-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.group-members,
+.group-resources {
+  display: grid;
+  gap: 12px;
+}
+
+.group-members h3,
+.group-resources h3 {
+  margin: 0;
+}
+
+.member-details {
+  display: grid;
+  gap: 8px;
+}
+
+.permission-fields {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #e5ece3;
+  border-radius: 10px;
+}
+
+.permission-fields legend {
+  padding: 0 5px;
+  color: #43544a;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.permission-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.permission-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 7px !important;
+  color: #43544a;
+  font-size: 0.82rem;
+  font-weight: 500 !important;
+}
+
+.permission-toggle input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: #287348;
+}
+
 .session-list h3 {
   margin: 0;
   font-size: 1.05rem;
@@ -392,6 +461,11 @@ footer {
 
   .account-toolbar,
   .session-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .group-card {
     align-items: flex-start;
     flex-direction: column;
   }

@@ -35,6 +35,22 @@ export type UserSession = {
   ip_address: string | null
 }
 
+export type SkillGroup = {
+  id: number
+  owner_id: number
+  name: string
+  created_at: string
+}
+
+export type GroupMember = {
+  user_id: number
+  display_name: string
+  is_owner: boolean
+  can_create: boolean
+  can_edit: boolean
+  can_assign: boolean
+}
+
 type AuthResponse = {
   access_token: string
   token_type: "bearer"
@@ -186,6 +202,65 @@ export const api = {
     }),
   deleteSkill: (id: number) =>
     request<void>(`/api/skills/${id}`, { method: "DELETE" }),
+  listGroups: () => request<SkillGroup[]>("/api/groups"),
+  createGroup: (data: { name: string }) =>
+    request<SkillGroup>("/api/groups", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateGroup: (id: number, name: string) =>
+    request<SkillGroup>(`/api/groups/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  deleteGroup: (id: number) =>
+    request<void>(`/api/groups/${id}`, { method: "DELETE" }),
+  listGroupMembers: (groupId: number) =>
+    request<GroupMember[]>(`/api/groups/${groupId}/members`),
+  addGroupMember: (
+    groupId: number,
+    data: { email: string; can_create: boolean; can_edit: boolean; can_assign: boolean },
+  ) =>
+    request<GroupMember>(`/api/groups/${groupId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateGroupMember: (
+    groupId: number,
+    userId: number,
+    data: Partial<Pick<GroupMember, "can_create" | "can_edit" | "can_assign">>,
+  ) =>
+    request<GroupMember>(`/api/groups/${groupId}/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  removeGroupMember: (groupId: number, userId: number) =>
+    request<void>(`/api/groups/${groupId}/members/${userId}`, { method: "DELETE" }),
+  listGroupSkills: (groupId: number) =>
+    request<SkillListing[]>(`/api/groups/${groupId}/skills`),
+  createGroupSkill: (
+    groupId: number,
+    data: Omit<SkillListing, "id" | "created_at" | "owner_id">,
+  ) =>
+    request<SkillListing>(`/api/groups/${groupId}/skills`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  assignGroupSkill: (groupId: number, skillId: number) =>
+    request<SkillListing>(`/api/groups/${groupId}/skills/${skillId}/assignment`, {
+      method: "POST",
+    }),
+  updateGroupSkill: (
+    groupId: number,
+    skillId: number,
+    data: Partial<Omit<SkillListing, "id" | "created_at" | "owner_id">>,
+  ) =>
+    request<SkillListing>(`/api/groups/${groupId}/skills/${skillId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  unassignGroupSkill: (groupId: number, skillId: number) =>
+    request<void>(`/api/groups/${groupId}/skills/${skillId}`, { method: "DELETE" }),
   listSessionRequests: () => request<SessionRequest[]>("/api/session-requests"),
   getSessionRequest: (id: number) =>
     request<SessionRequest>(`/api/session-requests/${id}`),
