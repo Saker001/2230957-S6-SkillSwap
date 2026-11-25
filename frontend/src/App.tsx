@@ -40,9 +40,25 @@ const emptyGroupMember = {
   can_assign: false,
 }
 
+type AppPage = "discover" | "learning" | "teach" | "groups" | "account"
+
+const appPages: { id: AppPage; label: string }[] = [
+  { id: "discover", label: "Discover" },
+  { id: "learning", label: "My learning" },
+  { id: "teach", label: "Teach" },
+  { id: "groups", label: "Groups" },
+  { id: "account", label: "Account" },
+]
+
+function pageFromHash(hash: string): AppPage {
+  const page = hash.slice(1)
+  return appPages.find((item) => item.id === page)?.id ?? "discover"
+}
+
 export default function App() {
   const [authStatus, setAuthStatus] = useState<"restoring" | "guest" | "authenticated">("restoring")
   const [adminRoute, setAdminRoute] = useState(() => window.location.hash === "#admin")
+  const [activePage, setActivePage] = useState<AppPage>(() => pageFromHash(window.location.hash))
   const [user, setUser] = useState<User | null>(null)
   const [authMode, setAuthMode] = useState<"login" | "signup">("login")
   const [authForm, setAuthForm] = useState(emptyAuthForm)
@@ -83,9 +99,13 @@ export default function App() {
   const canCreateGroupSkill = groupOwner || groupMember?.can_create === true
   const canEditGroupSkill = groupOwner || groupMember?.can_edit === true
   const canAssignGroupSkill = groupOwner || groupMember?.can_assign === true
+  const mySkills = skills.filter((skill) => skill.owner_id === user?.id)
 
   useEffect(() => {
-    const updateRoute = () => setAdminRoute(window.location.hash === "#admin")
+    const updateRoute = () => {
+      setAdminRoute(window.location.hash === "#admin")
+      setActivePage(pageFromHash(window.location.hash))
+    }
     window.addEventListener("hashchange", updateRoute)
     return () => window.removeEventListener("hashchange", updateRoute)
   }, [])
@@ -644,13 +664,18 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className="hero">
-        <p className="eyebrow">Learn from each other</p>
-        <h1>SkillSwap</h1>
-        <p className="intro">
-          Share what you know, discover a skill to learn, and arrange a session.
-        </p>
+        <div className="brand-lockup">
+          <span className="brand-mark" aria-hidden="true">S</span>
+          <div>
+            <p className="eyebrow">Learn from each other</p>
+            <h1>SkillSwap</h1>
+          </div>
+        </div>
         <div className="account-toolbar">
-          <span>Signed in as <strong>{user.display_name}</strong> ({user.role})</span>
+          <span className="account-identity">
+            <span className="account-avatar" aria-hidden="true">{user.display_name.slice(0, 1).toUpperCase()}</span>
+            <span><strong>{user.display_name}</strong><small>{user.role}</small></span>
+          </span>
           {user.role === "admin" && (
             <button
               className="secondary"
@@ -668,16 +693,37 @@ export default function App() {
       {notice && <p className="alert success" role="status">{notice}</p>}
       {loading && <p className="muted" role="status">Loading SkillSwap...</p>}
 
-      <section className="panel" aria-labelledby="skills-heading">
+      <nav className="app-nav" aria-label="Main navigation">
+        {appPages.map((page) => (
+          <a
+            className={activePage === page.id ? "app-nav-link active" : "app-nav-link"}
+            href={`#${page.id}`}
+            aria-current={activePage === page.id ? "page" : undefined}
+            key={page.id}
+          >
+            {page.label}
+            {page.id === "learning" && sessionRequests.length > 0 && (
+              <span className="nav-count">{sessionRequests.length}</span>
+            )}
+          </a>
+        ))}
+      </nav>
+
+      {(activePage === "discover" || activePage === "teach") && <section className="panel" aria-labelledby="skills-heading">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Explore and share</p>
-            <h2 id="skills-heading">Skill listings</h2>
+            <p className="eyebrow">{activePage === "teach" ? "Share what you know" : "Explore and learn"}</p>
+            <h2 id="skills-heading">{activePage === "teach" ? "Teach a skill" : "Discover skills"}</h2>
           </div>
-          <span className="count">{skills.length} listings</span>
+          <span className="count">
+            {activePage === "teach"
+              ? `${mySkills.length} your listings`
+              : `${skills.length} listings`}
+          </span>
         </div>
 
-        <div className="content-grid">
+        <div className={activePage === "teach" ? "content-grid" : "content-grid content-grid-single"}>
+          {activePage === "teach" && (
           <form className="form-card" onSubmit={handleSkillSubmit}>
             <h3>{editingSkillId === null ? "Offer a skill" : "Edit your listing"}</h3>
             <label>
@@ -745,12 +791,15 @@ export default function App() {
               )}
             </div>
           </form>
+          )}
 
           <div className="listing-column">
-            {skills.length === 0 && !loading ? (
-              <div className="empty-state">No skills yet. Add the first listing.</div>
+            {(activePage === "teach" ? mySkills : skills).length === 0 && !loading ? (
+              <div className="empty-state">
+                {activePage === "teach" ? "You have not shared a skill yet." : "No skills are available yet."}
+              </div>
             ) : (
-              skills.map((skill) => (
+              (activePage === "teach" ? mySkills : skills).map((skill) => (
                 <article className="item-card" key={skill.id}>
                   <div className="item-topline">
                     <span className="tag">{skill.category}</span>
@@ -761,7 +810,7 @@ export default function App() {
                   <p className="item-description">{skill.description}</p>
                   <div className="item-actions">
                     <button className="secondary" onClick={() => showSkill(skill.id)}>Details</button>
-                    {skill.owner_id === user.id && (
+                    {activePage === "teach" && skill.owner_id === user.id && (
                       <>
                         <button className="secondary" onClick={() => editSkill(skill)}>Edit</button>
                         <button className="danger" onClick={() => removeSkill(skill.id)}>Delete</button>
@@ -784,9 +833,9 @@ export default function App() {
             <p className="muted">Teacher: {selectedSkill.teacher_name} · Listing #{selectedSkill.id}</p>
           </div>
         )}
-      </section>
+      </section>}
 
-      <section className="panel" aria-labelledby="groups-heading">
+      {activePage === "groups" && <section className="panel" aria-labelledby="groups-heading">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Share with people you trust</p>
@@ -1105,9 +1154,9 @@ export default function App() {
             </div>
           </div>
         )}
-      </section>
+      </section>}
 
-      <section className="panel" aria-labelledby="requests-heading">
+      {activePage === "learning" && <section className="panel" aria-labelledby="requests-heading">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Arrange a learning session</p>
@@ -1251,8 +1300,8 @@ export default function App() {
             <p>{selectedRequest.message}</p>
           </div>
         )}
-      </section>
-      <section className="panel" aria-labelledby="account-heading">
+      </section>}
+      {activePage === "account" && <section className="panel" aria-labelledby="account-heading">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Account settings</p>
@@ -1336,7 +1385,7 @@ export default function App() {
             ))
           )}
         </div>
-      </section>
+      </section>}
       <footer>
         Signed in as {user.email}. Listings and session requests are limited to their owners and participants.
       </footer>

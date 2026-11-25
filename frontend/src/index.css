@@ -690,3 +690,194 @@ footer {
     width: 100%;
   }
 }
+
+.app-shell {
+  width: min(1180px, calc(100% - 40px));
+  padding-top: 32px;
+}
+
+.hero {
+  display: flex;
+  max-width: none;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  margin: 0 0 24px;
+  padding: 20px 24px;
+  border: 1px solid #e3ebe1;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.88);
+  text-align: left;
+  box-shadow: 0 8px 28px rgba(32, 63, 43, 0.05);
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.brand-mark,
+.account-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 12px;
+  background: #e8f4eb;
+  color: #287348;
+  font-weight: 800;
+}
+
+.brand-mark {
+  width: 46px;
+  height: 46px;
+  font-size: 1.4rem;
+}
+
+.hero .eyebrow {
+  margin-bottom: 3px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 1.65rem;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
+}
+
+.account-toolbar {
+  justify-content: flex-end;
+  margin: 0;
+}
+
+.account-identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-right: 4px;
+}
+
+.account-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.account-identity > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.account-identity strong {
+  color: #25392d;
+  font-size: 0.84rem;
+}
+
+.account-identity small {
+  color: #758279;
+  font-size: 0.74rem;
+  text-transform: capitalize;
+}
+
+.app-nav {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 22px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid #e3ebe1;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.72);
+  scrollbar-width: thin;
+}
+
+.app-nav-link {
+  display: inline-flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 9px;
+  color: #596b5f;
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.app-nav-link:hover {
+  background: #f0f5ef;
+  color: #234b34;
+}
+
+.app-nav-link.active {
+  background: #287348;
+  color: #fff;
+}
+
+.nav-count {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(40, 115, 72, 0.12);
+  color: inherit;
+  font-size: 0.7rem;
+}
+
+.app-nav-link.active .nav-count {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.content-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-nav-link:focus-visible,
+button:focus-visible {
+  outline: 3px solid rgba(84, 163, 111, 0.55);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    width: min(100% - 24px, 600px);
+    padding-top: 16px;
+  }
+
+  .hero {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .account-toolbar {
+    width: 100%;
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .app-nav {
+    position: sticky;
+    z-index: 2;
+    top: 8px;
+  }
+
+  .app-nav-link {
+    padding-right: 13px;
+    padding-left: 13px;
+  }
+}
+
+@media (max-width: 420px) {
+  .account-toolbar > button {
+    flex: 1;
+  }
+}
