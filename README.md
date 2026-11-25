@@ -67,6 +67,7 @@ Public signup cannot assign roles. Admin endpoints independently enforce the adm
 - [Product Requirements Document (PRD)](docs/01-prd.md) — product goals, users, release scope, and success criteria.
 - [Software Requirements Specification (SRS)](docs/02-srs.md) — functional, non-functional, and interface requirements.
 - [Technical Design Document (TDD)](docs/03-tdd.md) — current architecture and proposed implementation design.
+- [Final deployment report](FINAL_REPORT.md) and [PDF](FINAL_REPORT.pdf) — live status, verification checklist, and deployment evidence.
 
 ## Technology stack
 
@@ -213,7 +214,40 @@ python -m unittest discover -s tests
 
 ## Deployment
 
-The repository includes a `vercel.json` configuration for deploying the frontend and backend as Vercel services. Configure `DATABASE_URL` with a persistent PostgreSQL connection string and set stable `JWT_SECRET_KEY` and `PASSWORD_PEPPER` secrets in Vercel before deploying. The application rejects missing database configuration on Vercel instead of silently using ephemeral storage.
+The configured deployment is [SkillSwap on Vercel](https://2230957-s6-skillswap.vercel.app/). Its API documentation and OpenAPI schema are intended to be available at [`/api/docs`](https://2230957-s6-skillswap.vercel.app/api/docs) and [`/api/openapi.json`](https://2230957-s6-skillswap.vercel.app/api/openapi.json).
+
+The repository includes a `vercel.json` configuration for the frontend and backend services. Configure `DATABASE_URL` with a persistent Supabase/PostgreSQL connection string and set stable `JWT_SECRET_KEY` and `PASSWORD_PEPPER` secrets in the backend's Vercel production environment. Never put production secrets in this repository or frontend environment variables. The application rejects missing database configuration on Vercel instead of silently using ephemeral storage.
+
+At the final deployment check on 2026-11-25, the frontend returned HTTP 200 but displayed an API `Request failed (500)` error. The public `/api/health`, `/api/docs`, and `/api/openapi.json` routes each returned HTTP 500. This report does not infer a cause from the public responses; database/API-backed checks remain blocked until the Vercel backend and persistent database configuration are operational.
+
+### Safe demo-data provisioning
+
+`backend/seed_demo.py` creates or reuses two administrators, three members, one shared group with different member capabilities, and one sample group listing. It requires a PostgreSQL `DATABASE_URL`, the matching `JWT_SECRET_KEY` and `PASSWORD_PEPPER`, and environment variables for the five account emails. Password environment variables are required only for accounts not already present. The command is dry-run by default:
+
+```powershell
+python backend\seed_demo.py
+```
+
+For the first write, load the connection string, secrets, demo emails, and new-account passwords into the process environment from an approved secret manager. Then explicitly confirm the write:
+
+```powershell
+$env:DEMO_SEED_CONFIRM = "CREATE_OR_REUSE_SKILLSWAP_DEMO_DATA"
+python backend\seed_demo.py --apply
+```
+
+Required account variables are `DEMO_ADMIN_1_EMAIL`, `DEMO_ADMIN_2_EMAIL`, and `DEMO_MEMBER_1_EMAIL` through `DEMO_MEMBER_3_EMAIL`; provide the corresponding `_PASSWORD` only for accounts that need to be created. `DEMO_GROUP_NAME` is optional. Do not put secret values in command history, files, screenshots, reports, or source control. The script prints account IDs and roles, not email addresses or passwords. It never resets an existing password or changes an existing account's role or status; conflicting existing accounts, groups, or permissions stop the run. Re-running a successful seed reuses the same records.
+
+| Demo account | Role | Account ID |
+| --- | --- | --- |
+| Admin 1 | Administrator | Not provisioned; no production database access in this run |
+| Admin 2 | Administrator | Not provisioned; no production database access in this run |
+| Member 1 | Member | Not provisioned; no production database access in this run |
+| Member 2 | Member | Not provisioned; no production database access in this run |
+| Member 3 | Member | Not provisioned; no production database access in this run |
+
+The sample group is `SkillSwap final demo group` with member 1 allowed to create, member 2 allowed to edit, and member 3 allowed to assign group skills. It includes a `Demo: Introduction to Python` listing. These sample records have not been provisioned: no production database access was available in this run, and the public API currently returns HTTP 500.
+
+The live-check steps and evidence are tracked in [FINAL_REPORT.md](FINAL_REPORT.md). The student must record and submit their own 5–8 minute narrated video; no substitute recording is included.
 
 ## Configuration and security
 
