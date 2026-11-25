@@ -1,5 +1,13 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react"
-import { api, type SessionRequest, type SkillListing, type User, type UserSession } from "./api"
+import {
+  api,
+  type GroupMember,
+  type SessionRequest,
+  type SkillListing,
+  type User,
+  type UserSession,
+} from "./api"
+import AdminDashboard from "./AdminDashboard"
 
 const emptySkill = {
   teacher_name: "",
@@ -25,14 +33,31 @@ const emptyPasswordForm = {
   new_password: "",
 }
 
+const emptyGroupMember = {
+  email: "",
+  can_create: false,
+  can_edit: false,
+  can_assign: false,
+}
+
 export default function App() {
   const [authStatus, setAuthStatus] = useState<"restoring" | "guest" | "authenticated">("restoring")
+  const [adminRoute, setAdminRoute] = useState(() => window.location.hash === "#admin")
   const [user, setUser] = useState<User | null>(null)
   const [authMode, setAuthMode] = useState<"login" | "signup">("login")
   const [authForm, setAuthForm] = useState(emptyAuthForm)
   const [profileName, setProfileName] = useState("")
   const [passwordForm, setPasswordForm] = useState(emptyPasswordForm)
   const [userSessions, setUserSessions] = useState<UserSession[]>([])
+  const [groups, setGroups] = useState<Awaited<ReturnType<typeof api.listGroups>>>([])
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([])
+  const [groupSkills, setGroupSkills] = useState<SkillListing[]>([])
+  const [groupName, setGroupName] = useState("")
+  const [groupMemberForm, setGroupMemberForm] = useState(emptyGroupMember)
+  const [groupSkillForm, setGroupSkillForm] = useState(emptySkill)
+  const [groupSkillToAssign, setGroupSkillToAssign] = useState("")
+  const [editingGroupSkillId, setEditingGroupSkillId] = useState<number | null>(null)
   const [skills, setSkills] = useState<SkillListing[]>([])
   const [sessionRequests, setSessionRequests] = useState<SessionRequest[]>([])
   const [skillForm, setSkillForm] = useState(emptySkill)
@@ -52,6 +77,34 @@ export default function App() {
         skill.id === editingRequest.skill_listing_id && skill.owner_id === user?.id,
     )
   const editingRequestIsLearner = editingRequest?.learner_id === user?.id
+  const selectedGroup = groups.find((group) => group.id === selectedGroupId)
+  const groupOwner = selectedGroup?.owner_id === user?.id
+  const groupMember = groupMembers.find((member) => member.user_id === user?.id)
+  const canCreateGroupSkill = groupOwner || groupMember?.can_create === true
+  const canEditGroupSkill = groupOwner || groupMember?.can_edit === true
+  const canAssignGroupSkill = groupOwner || groupMember?.can_assign === true
+
+  useEffect(() => {
+    const updateRoute = () => setAdminRoute(window.location.hash === "#admin")
+    window.addEventListener("hashchange", updateRoute)
+    return () => window.removeEventListener("hashchange", updateRoute)
+  }, [])
+
+  useEffect(() => {
+    if (adminRoute && authStatus === "authenticated" && user?.role !== "admin") {
+      window.location.hash = ""
+      setAdminRoute(false)
+    }
+  }, [adminRoute, authStatus, user?.role])
+
+  const loadGroupData = useCallback(async (groupId: number) => {
+    const [members, listings] = await Promise.all([
+      api.listGroupMembers(groupId),
+      api.listGroupSkills(groupId),
+    ])
+    setGroupMembers(members)
+    setGroupSkills(listings)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -73,14 +126,16 @@ export default function App() {
   }, [])
 
   const refreshData = useCallback(async () => {
-    const [skillRows, requestRows, sessions] = await Promise.all([
+    const [skillRows, requestRows, sessions, groupRows] = await Promise.all([
       api.listSkills(),
       api.listSessionRequests(),
       api.listSessions(),
+      api.listGroups(),
     ])
     setSkills(skillRows)
     setSessionRequests(requestRows)
     setUserSessions(sessions)
+    setGroups(groupRows)
   }, [])
 
   useEffect(() => {
@@ -92,6 +147,30 @@ export default function App() {
       )
       .finally(() => setLoading(false))
   }, [authStatus, refreshData])
+
+  useEffect(() => {
+    if (authStatus !== "authenticated" || selectedGroupId === null) {
+      setGroupMembers([])
+      setGroupSkills([])
+      return
+    }
+    let active = true
+    Promise.all([
+      api.listGroupMembers(selectedGroupId),
+      api.listGroupSkills(selectedGroupId),
+    ])
+      .then(([members, listings]) => {
+        if (!active) return
+        setGroupMembers(members)
+        setGroupSkills(listings)
+      })
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Could not load this group."),
+      )
+    return () => {
+      active = false
+    }
+  }, [authStatus, selectedGroupId])
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -181,6 +260,154 @@ export default function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not revoke that session.")
     }
+  }
+
+  async function handleCreateGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError("")
+    setNotice("")
+    try {
+      const group = await api.createGroup({ name: groupName })
+      setGroupName("")
+      setSelectedGroupId(group.id)
+      await refreshData()
+      setNotice("Group created.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the group.")
+    }
+  }
+
+  async function handleRenameGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (selectedGroupId === null) return
+    setError("")
+    setNotice("")
+    try {
+      const group = await api.updateGroup(selectedGroupId, groupName)
+      setGroups((current) => current.map((item) => item.id === group.id ? group : item))
+      setNotice("Group renamed.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not rename the group.")
+    }
+  }
+
+  async function handleDeleteGroup() {
+    if (selectedGroupId === null || !window.confirm("Delete this group? Its skill listings will return to their owners.")) return
+    setError("")
+    setNotice("")
+    try {
+      await api.deleteGroup(selectedGroupId)
+      setSelectedGroupId(null)
+      await refreshData()
+      setNotice("Group deleted.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete the group.")
+    }
+  }
+
+  async function handleAddGroupMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (selectedGroupId === null) return
+    setError("")
+    setNotice("")
+    try {
+      await api.addGroupMember(selectedGroupId, groupMemberForm)
+      setGroupMemberForm(emptyGroupMember)
+      await loadGroupData(selectedGroupId)
+      setNotice("Member added with the selected capabilities.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add that member.")
+    }
+  }
+
+  async function handleGroupCapabilityChange(
+    member: GroupMember,
+    capability: "can_create" | "can_edit" | "can_assign",
+    enabled: boolean,
+  ) {
+    if (selectedGroupId === null) return
+    setError("")
+    try {
+      const updated = await api.updateGroupMember(selectedGroupId, member.user_id, {
+        [capability]: enabled,
+      })
+      setGroupMembers((current) =>
+        current.map((item) => item.user_id === updated.user_id ? updated : item),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update member capabilities.")
+    }
+  }
+
+  async function handleRemoveGroupMember(userId: number) {
+    if (selectedGroupId === null || !window.confirm("Remove this member from the group?")) return
+    setError("")
+    try {
+      await api.removeGroupMember(selectedGroupId, userId)
+      setGroupMembers((current) => current.filter((member) => member.user_id !== userId))
+      setNotice("Member removed.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove that member.")
+    }
+  }
+
+  async function handleGroupSkillSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (selectedGroupId === null) return
+    setError("")
+    setNotice("")
+    try {
+      if (editingGroupSkillId === null) {
+        await api.createGroupSkill(selectedGroupId, groupSkillForm)
+        setNotice("Group skill listing created.")
+      } else {
+        await api.updateGroupSkill(selectedGroupId, editingGroupSkillId, groupSkillForm)
+        setNotice("Group skill listing updated.")
+      }
+      setEditingGroupSkillId(null)
+      setGroupSkillForm(emptySkill)
+      await Promise.all([loadGroupData(selectedGroupId), refreshData()])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this group skill listing.")
+    }
+  }
+
+  async function handleAssignGroupSkill(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (selectedGroupId === null || !groupSkillToAssign) return
+    setError("")
+    setNotice("")
+    try {
+      await api.assignGroupSkill(selectedGroupId, Number(groupSkillToAssign))
+      setGroupSkillToAssign("")
+      await Promise.all([loadGroupData(selectedGroupId), refreshData()])
+      setNotice("Skill listing assigned to this group.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not assign this skill listing.")
+    }
+  }
+
+  async function handleUnassignGroupSkill(skillId: number) {
+    if (selectedGroupId === null || !window.confirm("Remove this listing from the group?")) return
+    setError("")
+    setNotice("")
+    try {
+      await api.unassignGroupSkill(selectedGroupId, skillId)
+      await Promise.all([loadGroupData(selectedGroupId), refreshData()])
+      setNotice("Skill listing removed from the group.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove this group listing.")
+    }
+  }
+
+  function editGroupSkill(skill: SkillListing) {
+    setEditingGroupSkillId(skill.id)
+    setGroupSkillForm({
+      teacher_name: skill.teacher_name,
+      title: skill.title,
+      description: skill.description,
+      category: skill.category,
+    })
   }
 
   async function handleSkillSubmit(event: FormEvent<HTMLFormElement>) {
@@ -391,6 +618,29 @@ export default function App() {
     )
   }
 
+  if (adminRoute && user.role === "admin") {
+    return (
+      <main className="app-shell">
+        <header className="hero admin-hero">
+          <p className="eyebrow">Learn from each other</p>
+          <h1>SkillSwap</h1>
+          <div className="account-toolbar">
+            <span>Signed in as <strong>{user.display_name}</strong> (admin)</span>
+            <button className="secondary" type="button" onClick={handleSignOut}>Sign out</button>
+          </div>
+        </header>
+        {error && <p className="alert error" role="alert">{error}</p>}
+        {notice && <p className="alert success" role="status">{notice}</p>}
+        <AdminDashboard
+          onExit={() => {
+            window.location.hash = ""
+            setAdminRoute(false)
+          }}
+        />
+      </main>
+    )
+  }
+
   return (
     <main className="app-shell">
       <header className="hero">
@@ -401,6 +651,15 @@ export default function App() {
         </p>
         <div className="account-toolbar">
           <span>Signed in as <strong>{user.display_name}</strong> ({user.role})</span>
+          {user.role === "admin" && (
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => { window.location.hash = "admin"; setAdminRoute(true) }}
+            >
+              Admin dashboard
+            </button>
+          )}
           <button className="secondary" type="button" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
@@ -523,6 +782,327 @@ export default function App() {
             <p><strong>{selectedSkill.title}</strong> · {selectedSkill.category}</p>
             <p>{selectedSkill.description}</p>
             <p className="muted">Teacher: {selectedSkill.teacher_name} · Listing #{selectedSkill.id}</p>
+          </div>
+        )}
+      </section>
+
+      <section className="panel" aria-labelledby="groups-heading">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Share with people you trust</p>
+            <h2 id="groups-heading">Groups</h2>
+          </div>
+          <span className="count">{groups.length} groups</span>
+        </div>
+        <div className="content-grid">
+          <form className="form-card" onSubmit={handleCreateGroup}>
+            <h3>Create a group</h3>
+            <label>
+              Group name
+              <input
+                required
+                maxLength={100}
+                value={groupName}
+                onChange={(event) => setGroupName(event.target.value)}
+                placeholder="e.g. Weekend learners"
+              />
+            </label>
+            <button className="primary" type="submit">Create group</button>
+          </form>
+          <div className="listing-column">
+            {groups.length === 0 ? (
+              <div className="empty-state">You are not in any groups yet.</div>
+            ) : (
+              groups.map((group) => (
+                <article className="item-card group-card" key={group.id}>
+                  <div>
+                    <h3>{group.name}</h3>
+                    <p className="muted">{group.owner_id === user.id ? "Owner" : "Member"}</p>
+                  </div>
+                  <button
+                    className={selectedGroupId === group.id ? "primary" : "secondary"}
+                    type="button"
+                    aria-pressed={selectedGroupId === group.id}
+                    onClick={() => {
+                      setSelectedGroupId(group.id)
+                      setGroupName(group.name)
+                      setError("")
+                    }}
+                  >
+                    {selectedGroupId === group.id ? "Selected" : "Open group"}
+                  </button>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        {selectedGroup && (
+          <div className="group-workspace">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">{groupOwner ? "Owner controls" : "Shared workspace"}</p>
+                <h3>{selectedGroup.name}</h3>
+              </div>
+            </div>
+
+            {groupOwner ? (
+              <div className="content-grid">
+                <form className="form-card" onSubmit={handleRenameGroup}>
+                  <h3>Group settings</h3>
+                  <label>
+                    Name
+                    <input
+                      required
+                      maxLength={100}
+                      value={groupName}
+                      onChange={(event) => setGroupName(event.target.value)}
+                    />
+                  </label>
+                  <div className="form-actions">
+                    <button className="primary" type="submit">Save name</button>
+                    <button className="danger" type="button" onClick={handleDeleteGroup}>
+                      Delete group
+                    </button>
+                  </div>
+                </form>
+
+                <form className="form-card" onSubmit={handleAddGroupMember}>
+                  <h3>Add a member</h3>
+                  <label>
+                    Account email
+                    <input
+                      required
+                      type="email"
+                      value={groupMemberForm.email}
+                      onChange={(event) =>
+                        setGroupMemberForm({ ...groupMemberForm, email: event.target.value })
+                      }
+                      placeholder="person@example.com"
+                    />
+                  </label>
+                  <fieldset className="permission-fields">
+                    <legend>Grant only the needed capabilities</legend>
+                    {([
+                      ["can_create", "Create group listings"],
+                      ["can_edit", "Edit group listings"],
+                      ["can_assign", "Assign or remove listings"],
+                    ] as const).map(([field, label]) => (
+                      <label className="permission-toggle" key={field}>
+                        <input
+                          type="checkbox"
+                          checked={groupMemberForm[field]}
+                          onChange={(event) =>
+                            setGroupMemberForm({
+                              ...groupMemberForm,
+                              [field]: event.target.checked,
+                            })
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </fieldset>
+                  <button className="primary" type="submit">Add member</button>
+                </form>
+              </div>
+            ) : (
+              <p className="muted">
+                Your capabilities: {[
+                  groupMember?.can_create && "create",
+                  groupMember?.can_edit && "edit",
+                  groupMember?.can_assign && "assign",
+                ].filter(Boolean).join(", ") || "view group listings"}.
+              </p>
+            )}
+
+            <div className="group-members">
+              <h3>Members</h3>
+              {groupMembers.map((member) => (
+                <article className="session-row" key={member.user_id}>
+                  <div className="member-details">
+                    <strong>{member.display_name}{member.is_owner ? " · Owner" : ""}</strong>
+                    {member.is_owner ? (
+                      <p className="muted">Full group management and resource access</p>
+                    ) : groupOwner ? (
+                      <div className="permission-list">
+                        {([
+                          ["can_create", "Create"],
+                          ["can_edit", "Edit"],
+                          ["can_assign", "Assign"],
+                        ] as const).map(([field, label]) => (
+                          <label className="permission-toggle" key={field}>
+                            <input
+                              type="checkbox"
+                              checked={member[field]}
+                              onChange={(event) =>
+                                handleGroupCapabilityChange(member, field, event.target.checked)
+                              }
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted">
+                        {[member.can_create && "Create", member.can_edit && "Edit", member.can_assign && "Assign"]
+                          .filter(Boolean).join(" · ") || "View listings"}
+                      </p>
+                    )}
+                  </div>
+                  {groupOwner && !member.is_owner && (
+                    <button
+                      className="danger"
+                      type="button"
+                      onClick={() => handleRemoveGroupMember(member.user_id)}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </article>
+              ))}
+            </div>
+
+            <div className="group-resources">
+              <div className="section-heading">
+                <div>
+                  <h3>Group skill listings</h3>
+                  <p className="muted">Only this group's members can view these listings.</p>
+                </div>
+                <span className="count">{groupSkills.length} listings</span>
+              </div>
+              <div className="content-grid">
+                {canCreateGroupSkill && (
+                  <form className="form-card" onSubmit={handleGroupSkillSubmit}>
+                    <h3>{editingGroupSkillId === null ? "Create a group listing" : "Edit group listing"}</h3>
+                    <label>
+                      Teacher name
+                      <input
+                        required
+                        maxLength={80}
+                        value={groupSkillForm.teacher_name}
+                        onChange={(event) =>
+                          setGroupSkillForm({ ...groupSkillForm, teacher_name: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Skill title
+                      <input
+                        required
+                        maxLength={100}
+                        value={groupSkillForm.title}
+                        onChange={(event) =>
+                          setGroupSkillForm({ ...groupSkillForm, title: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Category
+                      <input
+                        required
+                        maxLength={60}
+                        value={groupSkillForm.category}
+                        onChange={(event) =>
+                          setGroupSkillForm({ ...groupSkillForm, category: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Description
+                      <textarea
+                        required
+                        maxLength={1000}
+                        rows={4}
+                        value={groupSkillForm.description}
+                        onChange={(event) =>
+                          setGroupSkillForm({ ...groupSkillForm, description: event.target.value })
+                        }
+                      />
+                    </label>
+                    <div className="form-actions">
+                      <button className="primary" type="submit">
+                        {editingGroupSkillId === null ? "Create listing" : "Save changes"}
+                      </button>
+                      {editingGroupSkillId !== null && (
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() => {
+                            setEditingGroupSkillId(null)
+                            setGroupSkillForm(emptySkill)
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                )}
+                <div className="listing-column">
+                  {canAssignGroupSkill && (
+                    <form className="form-card" onSubmit={handleAssignGroupSkill}>
+                      <h3>Assign one of your listings</h3>
+                      <label>
+                        Personal skill listing
+                        <select
+                          required
+                          value={groupSkillToAssign}
+                          onChange={(event) => setGroupSkillToAssign(event.target.value)}
+                        >
+                          <option value="">Choose a listing</option>
+                          {skills.filter((skill) => skill.owner_id === user.id).map((skill) => (
+                            <option value={skill.id} key={skill.id}>{skill.title}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        className="primary"
+                        type="submit"
+                        disabled={!skills.some((skill) => skill.owner_id === user.id)}
+                      >
+                        Assign listing
+                      </button>
+                    </form>
+                  )}
+                  {groupSkills.length === 0 ? (
+                    <div className="empty-state">No listings have been shared with this group.</div>
+                  ) : (
+                    groupSkills.map((skill) => (
+                      <article className="item-card" key={skill.id}>
+                        <div className="item-topline">
+                          <span className="tag">{skill.category}</span>
+                          <span className="muted">#{skill.id}</span>
+                        </div>
+                        <h3>{skill.title}</h3>
+                        <p className="muted">Taught by {skill.teacher_name}</p>
+                        <p className="item-description">{skill.description}</p>
+                        <div className="item-actions">
+                          {canEditGroupSkill && (
+                            <button
+                              className="secondary"
+                              type="button"
+                              onClick={() => editGroupSkill(skill)}
+                            >
+                              Edit
+                            </button>
+                          )}
+                          {canAssignGroupSkill && (
+                            <button
+                              className="danger"
+                              type="button"
+                              onClick={() => handleUnassignGroupSkill(skill.id)}
+                            >
+                              Remove from group
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </section>

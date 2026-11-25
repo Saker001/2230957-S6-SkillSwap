@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 import sys
 import tempfile
@@ -20,8 +22,14 @@ os.environ["JWT_SECRET_KEY"] = "test-only-jwt-secret-key-not-for-deployments"
 os.environ["PASSWORD_PEPPER"] = "test-only-password-pepper-not-for-deployments"
 
 from database import engine  # noqa: E402
+from audit import AuditEvent  # noqa: E402
 from auth import JWT_ISSUER, JWT_SECRET_KEY, RefreshSession, User  # noqa: E402
-from migrations import migrate_resource_ownership  # noqa: E402
+from migrations import (  # noqa: E402
+    migrate_admin_user_fields,
+    migrate_audit_event_client_metadata,
+    migrate_resource_ownership,
+)
+from permissions import ROLE_ADMIN  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -75,6 +83,14 @@ class SkillSwapApiTests(unittest.TestCase):
         client.headers.update({"Authorization": f"Bearer {login.json()['access_token']}"})
         return client, login.json()["user"]
 
+    def promote_to_admin(self, user_id: int | None = None) -> None:
+        with Session(engine) as database_session:
+            user = database_session.get(User, user_id or self.user_id)
+            self.assertIsNotNone(user)
+            user.role = ROLE_ADMIN
+            database_session.add(user)
+            database_session.commit()
+
     def create_skill(self, client: TestClient | None = None, **extra) -> dict:
         response = (client or self.client).post(
             "/api/skills",
@@ -87,6 +103,33 @@ class SkillSwapApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 201)
+        return response.json()
+
+    def create_group(self, name: str = "Study group", client: TestClient | None = None) -> dict:
+        response = (client or self.client).post("/api/groups", json={"name": name})
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def add_group_member(
+        self,
+        group_id: int,
+        user: dict,
+        *,
+        client: TestClient | None = None,
+        can_create: bool = False,
+        can_edit: bool = False,
+        can_assign: bool = False,
+    ) -> dict:
+        response = (client or self.client).post(
+            f"/api/groups/{group_id}/members",
+            json={
+                "email": user["email"],
+                "can_create": can_create,
+                "can_edit": can_edit,
+                "can_assign": can_assign,
+            },
+        )
+        self.assertEqual(response.status_code, 201, response.text)
         return response.json()
 
     def test_skill_listing_crud(self) -> None:
@@ -128,6 +171,236 @@ class SkillSwapApiTests(unittest.TestCase):
         finally:
             other_client.close()
 
+    def test_group_settings_and_membership_are_owner_only(self) -> None:
+        group = self.create_group("  Guitar circle  ")
+        self.assertEqual(group["name"], "Guitar circle")
+        member_client, member = self.create_member()
+        outsider_client, _outsider = self.create_member()
+        try:
+            self.assertEqual(member_client.get("/api/groups").json(), [])
+            membership = self.add_group_member(group["id"], member)
+            self.assertEqual(membership["display_name"], "Casey")
+            self.assertFalse(membership["can_create"])
+            self.assertFalse(membership["can_edit"])
+            self.assertFalse(membership["can_assign"])
+            group_skill = self.client.post(
+                f"/api/groups/{group['id']}/skills",
+                json={
+                    "teacher_name": "Ari",
+                    "title": "Shared guitar",
+                    "description": "A group-owned listing.",
+                    "category": "Music",
+                },
+            )
+            self.assertEqual(group_skill.status_code, 201, group_skill.text)
+
+            visible_groups = member_client.get("/api/groups").json()
+            self.assertEqual([item["id"] for item in visible_groups], [group["id"]])
+            self.assertEqual(
+                member_client.get(f"/api/groups/{group['id']}").status_code,
+                200,
+            )
+            member_rows = member_client.get(f"/api/groups/{group['id']}/members").json()
+            self.assertEqual({row["user_id"] for row in member_rows}, {self.user_id, member["id"]})
+            self.assertNotIn("email", member_rows[0])
+
+            self.assertEqual(outsider_client.get("/api/groups").json(), [])
+            self.assertEqual(
+                outsider_client.get(f"/api/groups/{group['id']}").status_code,
+                404,
+            )
+            self.assertEqual(
+                outsider_client.get(f"/api/groups/{group['id']}/members").status_code,
+                404,
+            )
+            self.assertEqual(
+                member_client.patch(
+                    f"/api/groups/{group['id']}",
+                    json={"name": "Member rename"},
+                ).status_code,
+                403,
+            )
+            self.assertEqual(
+                member_client.post(
+                    f"/api/groups/{group['id']}/members",
+                    json={"email": self.user_email},
+                ).status_code,
+                403,
+            )
+            self.assertEqual(
+                member_client.delete(
+                    f"/api/groups/{group['id']}/members/{self.user_id}"
+                ).status_code,
+                403,
+            )
+            self.assertEqual(
+                member_client.delete(f"/api/groups/{group['id']}").status_code,
+                403,
+            )
+            renamed = self.client.patch(
+                f"/api/groups/{group['id']}",
+                json={"name": "Owner rename"},
+            )
+            self.assertEqual(renamed.status_code, 200)
+            self.assertEqual(renamed.json()["name"], "Owner rename")
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/groups/{group['id']}/members/{member['id']}",
+                    json={"can_create": True, "can_edit": False, "can_assign": False},
+                ).status_code,
+                200,
+            )
+            self.assertEqual(
+                self.client.delete(
+                    f"/api/groups/{group['id']}/members/{member['id']}"
+                ).status_code,
+                204,
+            )
+            self.assertEqual(
+                member_client.get(f"/api/groups/{group['id']}").status_code,
+                404,
+            )
+            self.assertEqual(
+                self.client.delete(f"/api/groups/{group['id']}").status_code,
+                204,
+            )
+            self.assertEqual(
+                self.client.get(f"/api/skills/{group_skill.json()['id']}").status_code,
+                200,
+            )
+        finally:
+            member_client.close()
+            outsider_client.close()
+
+    def test_group_capabilities_and_group_resource_isolation(self) -> None:
+        group = self.create_group("Shared skills")
+        member_client, member = self.create_member()
+        outsider_client, _outsider = self.create_member()
+        try:
+            self.add_group_member(group["id"], member, can_assign=True)
+            personal_skill = self.create_skill(member_client)
+            owner_skill = self.create_skill()
+
+            self.assertEqual(
+                member_client.post(
+                    f"/api/groups/{group['id']}/skills",
+                    json={
+                        "teacher_name": "Casey",
+                        "title": "Should be denied",
+                        "description": "No create capability.",
+                        "category": "Music",
+                    },
+                ).status_code,
+                403,
+            )
+            self.assertEqual(
+                member_client.patch(
+                    f"/api/groups/{group['id']}/skills/{personal_skill['id']}",
+                    json={"title": "Should be denied"},
+                ).status_code,
+                403,
+            )
+            self.assertEqual(
+                member_client.post(
+                    f"/api/groups/{group['id']}/skills/{owner_skill['id']}/assignment"
+                ).status_code,
+                404,
+            )
+            assigned = member_client.post(
+                f"/api/groups/{group['id']}/skills/{personal_skill['id']}/assignment"
+            )
+            self.assertEqual(assigned.status_code, 200, assigned.text)
+            self.assertEqual(
+                [row["id"] for row in member_client.get(f"/api/groups/{group['id']}/skills").json()],
+                [personal_skill["id"]],
+            )
+            self.assertEqual(
+                self.client.get(f"/api/skills/{personal_skill['id']}").status_code,
+                404,
+            )
+            self.assertNotIn(
+                personal_skill["id"],
+                [row["id"] for row in self.client.get("/api/skills").json()],
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/api/session-requests",
+                    json={
+                        "skill_listing_id": personal_skill["id"],
+                        "message": "Try to reach a private listing.",
+                    },
+                ).status_code,
+                404,
+            )
+            self.assertEqual(
+                outsider_client.get(f"/api/groups/{group['id']}/skills").status_code,
+                404,
+            )
+            self.assertEqual(
+                outsider_client.patch(
+                    f"/api/groups/{group['id']}/skills/{personal_skill['id']}",
+                    json={"title": "Outsider edit"},
+                ).status_code,
+                404,
+            )
+
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/groups/{group['id']}/members/{member['id']}",
+                    json={"can_create": False, "can_edit": True, "can_assign": True},
+                ).status_code,
+                200,
+            )
+            updated = member_client.patch(
+                f"/api/groups/{group['id']}/skills/{personal_skill['id']}",
+                json={"title": "Group guitar"},
+            )
+            self.assertEqual(updated.status_code, 200, updated.text)
+            self.assertEqual(updated.json()["title"], "Group guitar")
+
+            second_group_owner, second_owner = self.create_member()
+            try:
+                second_group = self.create_group("Private group", client=second_group_owner)
+                private_listing = second_group_owner.post(
+                    f"/api/groups/{second_group['id']}/skills",
+                    json={
+                        "teacher_name": "Jordan",
+                        "title": "Private piano",
+                        "description": "Visible only in the private group.",
+                        "category": "Music",
+                    },
+                )
+                self.assertEqual(private_listing.status_code, 201, private_listing.text)
+                private_skill_id = private_listing.json()["id"]
+                self.assertNotIn(
+                    second_group["id"],
+                    [item["id"] for item in self.client.get("/api/groups").json()],
+                )
+                self.assertEqual(
+                    self.client.get(f"/api/groups/{second_group['id']}/skills").status_code,
+                    404,
+                )
+                self.assertEqual(
+                    member_client.get(f"/api/groups/{second_group['id']}/skills").status_code,
+                    404,
+                )
+                self.assertEqual(
+                    self.client.get(f"/api/skills/{private_skill_id}").status_code,
+                    404,
+                )
+                self.assertEqual(
+                    member_client.patch(
+                        f"/api/groups/{group['id']}/skills/{private_skill_id}",
+                        json={"title": "Cross-group modification"},
+                    ).status_code,
+                    404,
+                )
+            finally:
+                second_group_owner.close()
+        finally:
+            member_client.close()
+            outsider_client.close()
+
     def test_skill_create_validates_required_fields(self) -> None:
         response = self.client.post(
             "/api/skills",
@@ -146,6 +419,16 @@ class SkillSwapApiTests(unittest.TestCase):
         paths = response.json()["paths"]
         for path in ("/api/skills", "/api/skills/{skill_id}"):
             self.assertIn(path, paths)
+        for path in (
+            "/api/groups",
+            "/api/groups/{group_id}",
+            "/api/groups/{group_id}/members",
+            "/api/groups/{group_id}/members/{user_id}",
+            "/api/groups/{group_id}/skills",
+            "/api/groups/{group_id}/skills/{skill_id}",
+            "/api/groups/{group_id}/skills/{skill_id}/assignment",
+        ):
+            self.assertIn(path, paths)
         for method in ("get", "post"):
             self.assertIn(method, paths["/api/skills"])
         for method in ("get", "patch", "delete"):
@@ -157,6 +440,351 @@ class SkillSwapApiTests(unittest.TestCase):
         self.assertIn("/api/auth/login", paths)
         self.assertIn("/api/auth/refresh", paths)
         self.assertIn("/api/users/me", paths)
+        self.assertIn("/api/admin/overview", paths)
+        self.assertIn("/api/admin/users", paths)
+        self.assertIn("/api/admin/listings", paths)
+        self.assertIn("/api/admin/groups", paths)
+
+    def test_admin_routes_are_denied_to_members_and_guests(self) -> None:
+        anonymous = TestClient(app)
+        for path in (
+            "/api/admin/overview",
+            "/api/admin/users",
+            "/api/admin/categories",
+            "/api/admin/activity",
+            "/api/admin/security/failed-logins",
+            "/api/admin/exports/users.csv",
+            "/api/admin/exports/records.csv",
+            "/api/admin/exports/activity.csv",
+        ):
+            self.assertEqual(self.client.get(path).status_code, 403)
+            self.assertEqual(anonymous.get(path).status_code, 401)
+        anonymous.close()
+
+    def test_authentication_audit_metadata_and_failed_login_insights(self) -> None:
+        missing_email = f"missing-{uuid.uuid4()}@example.com"
+        anonymous = TestClient(app, client=("203.0.113.45", 4300))
+        try:
+            failed = anonymous.post(
+                "/api/auth/login",
+                json={"email": missing_email, "password": "do-not-store-this-password"},
+                headers={"User-Agent": "AuditTest/1.0"},
+            )
+            self.assertEqual(failed.status_code, 401)
+
+            self.promote_to_admin()
+            filtered = self.client.get(
+                "/api/admin/activity",
+                params={"action": "auth.login_failed", "q": missing_email},
+            )
+            self.assertEqual(filtered.status_code, 200, filtered.text)
+            self.assertEqual(len(filtered.json()), 1)
+            event = filtered.json()[0]
+            self.assertIsNone(event["actor_id"])
+            self.assertEqual(event["target_id"], missing_email)
+            self.assertEqual(event["ip_address"], "203.0.113.45")
+            self.assertEqual(event["user_agent"], "AuditTest/1.0")
+            self.assertNotIn("do-not-store-this-password", event["details"])
+
+            insights = self.client.get(
+                "/api/admin/security/failed-logins",
+                params={"q": missing_email},
+            )
+            self.assertEqual(insights.status_code, 200, insights.text)
+            self.assertEqual(insights.json()["by_account"][0]["value"], missing_email)
+            self.assertEqual(insights.json()["by_account"][0]["count"], 1)
+            self.assertEqual(insights.json()["by_ip"][0]["value"], "203.0.113.45")
+
+            member_client, member = self.create_member()
+            try:
+                self.assertEqual(member_client.post("/api/auth/logout").status_code, 204)
+                revoked_client, revoked_user = self.create_member()
+                try:
+                    session_id = revoked_client.get("/api/users/me/sessions").json()[0]["id"]
+                    self.assertEqual(
+                        revoked_client.delete(f"/api/users/me/sessions/{session_id}").status_code,
+                        204,
+                    )
+                finally:
+                    revoked_client.close()
+            finally:
+                member_client.close()
+
+            changed = self.client.post(
+                "/api/users/me/password",
+                json={
+                    "current_password": "correct horse battery staple",
+                    "new_password": "new secure test password",
+                },
+                headers={"User-Agent": "PasswordChangeTest/1.0"},
+            )
+            self.assertEqual(changed.status_code, 204, changed.text)
+            with Session(engine) as database_session:
+                actions = set(
+                    database_session.exec(
+                        select(AuditEvent.action).where(
+                            AuditEvent.action.in_(
+                                [
+                                    "auth.login_succeeded",
+                                    "auth.logout",
+                                    "auth.password_changed",
+                                    "user.session_revoked",
+                                ]
+                            )
+                        )
+                    ).all()
+                )
+                self.assertTrue(
+                    {
+                        "auth.login_succeeded",
+                        "auth.logout",
+                        "auth.password_changed",
+                        "user.session_revoked",
+                    }.issubset(actions)
+                )
+                failed_event = database_session.exec(
+                    select(AuditEvent).where(AuditEvent.target_id == missing_email)
+                ).one()
+                self.assertNotIn("do-not-store-this-password", failed_event.details)
+                self.assertNotIn("token", failed_event.details.lower())
+        finally:
+            anonymous.close()
+
+    def test_admin_csv_exports_preserve_filters_and_exclude_credentials(self) -> None:
+        self.promote_to_admin()
+        member_client, member = self.create_member()
+        try:
+            matching = self.create_skill(title="Guitar lessons", category="Music")
+            self.create_skill(title="Painting class", category="Art")
+
+            users_export = self.client.get(
+                "/api/admin/exports/users.csv",
+                params={"q": member["email"], "role": "user", "banned": "false"},
+            )
+            self.assertEqual(users_export.status_code, 200, users_export.text)
+            user_rows = list(csv.reader(io.StringIO(users_export.text)))
+            self.assertEqual(user_rows[0], [
+                "id", "email", "display_name", "role", "is_active", "is_banned", "created_at",
+            ])
+            self.assertEqual([row[1] for row in user_rows[1:]], [member["email"]])
+            self.assertNotIn("password_hash", users_export.text)
+            self.assertNotIn("token_hash", users_export.text)
+            self.assertNotIn("correct horse battery staple", users_export.text)
+
+            records_export = self.client.get(
+                "/api/admin/exports/records.csv",
+                params={"q": "Guitar", "category": "Music"},
+            )
+            self.assertEqual(records_export.status_code, 200, records_export.text)
+            record_rows = list(csv.reader(io.StringIO(records_export.text)))
+            self.assertEqual([int(row[0]) for row in record_rows[1:]], [matching["id"]])
+
+            failed_email = f"export-{uuid.uuid4()}@example.com"
+            self.client.post(
+                "/api/auth/login",
+                json={"email": failed_email, "password": "not-a-password"},
+            )
+            activity_export = self.client.get(
+                "/api/admin/exports/activity.csv",
+                params={"action": "auth.login_failed", "q": failed_email},
+            )
+            self.assertEqual(activity_export.status_code, 200, activity_export.text)
+            activity_rows = list(csv.reader(io.StringIO(activity_export.text)))
+            self.assertEqual(len(activity_rows), 2)
+            self.assertEqual(activity_rows[1][2], "auth.login_failed")
+            self.assertEqual(activity_rows[1][4], failed_email)
+
+            filtered_activity = self.client.get(
+                "/api/admin/activity",
+                params={"action": "auth.login_failed", "q": failed_email},
+            )
+            self.assertEqual(len(filtered_activity.json()), 1)
+        finally:
+            member_client.close()
+
+    def test_admin_user_controls_enforce_safety_bans_and_audit(self) -> None:
+        member_client, member = self.create_member()
+        try:
+            self.promote_to_admin()
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{self.user_id}/role",
+                    json={"role": "user"},
+                ).status_code,
+                409,
+            )
+            self.assertEqual(
+                self.client.post(
+                    f"/api/admin/users/{self.user_id}/ban",
+                    json={"reason": "Self ban"},
+                ).status_code,
+                409,
+            )
+
+            listing = member_client.post(
+                "/api/skills",
+                json={
+                    "teacher_name": "Casey",
+                    "title": "Member piano",
+                    "description": "A member record.",
+                    "category": "Music",
+                },
+            )
+            self.assertEqual(listing.status_code, 201)
+            detail = self.client.get(f"/api/admin/users/{member['id']}")
+            self.assertEqual(detail.status_code, 200, detail.text)
+            self.assertEqual(len(detail.json()["records"]), 1)
+            self.assertEqual(len(detail.json()["sessions"]), 1)
+
+            banned = self.client.post(
+                f"/api/admin/users/{member['id']}/ban",
+                json={"reason": "Repeated abuse"},
+            )
+            self.assertEqual(banned.status_code, 200, banned.text)
+            self.assertTrue(banned.json()["is_banned"])
+            self.assertEqual(member_client.get("/api/users/me").status_code, 401)
+            self.assertEqual(
+                member_client.post(
+                    "/api/auth/login",
+                    json={
+                        "email": member["email"],
+                        "password": "correct horse battery staple",
+                    },
+                ).status_code,
+                401,
+            )
+
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{member['id']}/role",
+                    json={"role": "admin"},
+                ).status_code,
+                409,
+            )
+            self.assertEqual(
+                self.client.post(f"/api/admin/users/{member['id']}/unban").status_code,
+                200,
+            )
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{member['id']}/role",
+                    json={"role": "admin"},
+                ).status_code,
+                200,
+            )
+            self.assertEqual(
+                self.client.post(
+                    f"/api/admin/users/{member['id']}/ban",
+                    json={"reason": "Cannot ban an admin"},
+                ).status_code,
+                409,
+            )
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/admin/users/{member['id']}/role",
+                    json={"role": "user"},
+                ).status_code,
+                200,
+            )
+            fresh_login = member_client.post(
+                "/api/auth/login",
+                json={
+                    "email": member["email"],
+                    "password": "correct horse battery staple",
+                },
+            )
+            self.assertEqual(fresh_login.status_code, 200, fresh_login.text)
+            new_session_id = fresh_login.json()["session_id"]
+            revoked = self.client.post(
+                f"/api/admin/users/{member['id']}/sessions/{new_session_id}/revoke"
+            )
+            self.assertEqual(revoked.status_code, 204, revoked.text)
+            self.assertEqual(
+                member_client.get(
+                    "/api/users/me",
+                    headers={"Authorization": f"Bearer {fresh_login.json()['access_token']}"},
+                ).status_code,
+                401,
+            )
+
+            events = self.client.get("/api/admin/activity")
+            self.assertEqual(events.status_code, 200)
+            actions = [event["action"] for event in events.json()]
+            self.assertIn("user.banned", actions)
+            self.assertIn("user.unbanned", actions)
+            self.assertIn("user.role_changed", actions)
+            self.assertIn("user.session_revoked", actions)
+        finally:
+            member_client.close()
+
+    def test_admin_filters_bulk_actions_moderation_and_categories(self) -> None:
+        self.promote_to_admin()
+        member_client, member = self.create_member()
+        try:
+            filtered_users = self.client.get(
+                "/api/admin/users",
+                params={"q": member["email"], "banned": "false", "limit": 1},
+            )
+            self.assertEqual(filtered_users.status_code, 200, filtered_users.text)
+            self.assertEqual(filtered_users.json()["total"], 1)
+            self.assertEqual(filtered_users.json()["items"][0]["id"], member["id"])
+
+            bulk_ban = self.client.post(
+                "/api/admin/users/bulk-ban",
+                json={"user_ids": [member["id"]], "reason": "Policy violation"},
+            )
+            self.assertEqual(bulk_ban.status_code, 200, bulk_ban.text)
+            self.assertEqual(bulk_ban.json()["affected"], 1)
+            bulk_unban = self.client.post(
+                "/api/admin/users/bulk-unban",
+                json={"ids": [member["id"]]},
+            )
+            self.assertEqual(bulk_unban.status_code, 200, bulk_unban.text)
+            self.assertEqual(bulk_unban.json()["affected"], 1)
+
+            category = self.client.post("/api/admin/categories", json={"name": "Music"})
+            self.assertEqual(category.status_code, 201, category.text)
+            listing = self.create_skill(category="Music")
+            renamed = self.client.patch(
+                f"/api/admin/categories/{category.json()['id']}",
+                json={"name": "Performing arts"},
+            )
+            self.assertEqual(renamed.status_code, 200, renamed.text)
+            self.assertEqual(
+                self.client.get(
+                    "/api/admin/listings",
+                    params={"category": "Performing arts"},
+                ).json()["items"][0]["id"],
+                listing["id"],
+            )
+            self.assertEqual(
+                self.client.delete(f"/api/admin/categories/{category.json()['id']}").status_code,
+                409,
+            )
+
+            group = self.create_group("Admin moderation target")
+            self.assertEqual(
+                self.client.get("/api/admin/groups", params={"q": "moderation"}).json()["items"][0]["id"],
+                group["id"],
+            )
+            listings_deleted = self.client.post(
+                "/api/admin/listings/bulk-delete",
+                json={"ids": [listing["id"]]},
+            )
+            groups_deleted = self.client.post(
+                "/api/admin/groups/bulk-delete",
+                json={"ids": [group["id"]]},
+            )
+            self.assertEqual(listings_deleted.status_code, 200, listings_deleted.text)
+            self.assertEqual(groups_deleted.status_code, 200, groups_deleted.text)
+            self.assertEqual(listings_deleted.json()["affected"], 1)
+            self.assertEqual(groups_deleted.json()["affected"], 1)
+            self.assertEqual(
+                self.client.delete(f"/api/admin/categories/{category.json()['id']}").status_code,
+                204,
+            )
+        finally:
+            member_client.close()
 
     def test_authentication_rejects_missing_or_invalid_tokens(self) -> None:
         anonymous = TestClient(app)
@@ -467,6 +1095,8 @@ class SkillSwapApiTests(unittest.TestCase):
 
             migrate_resource_ownership(legacy_engine)
             migrate_resource_ownership(legacy_engine)
+            migrate_admin_user_fields(legacy_engine)
+            migrate_admin_user_fields(legacy_engine)
             with legacy_engine.connect() as connection:
                 skill = connection.execute(
                     text("SELECT title, owner_id FROM skill_listings WHERE id = 1")
@@ -476,6 +1106,42 @@ class SkillSwapApiTests(unittest.TestCase):
                 ).one()
             self.assertEqual(skill, ("Legacy skill", None))
             self.assertEqual(request, ("Message", None))
+        finally:
+            legacy_engine.dispose()
+
+    def test_audit_metadata_migration_is_repeatable(self) -> None:
+        legacy_engine = create_engine("sqlite://")
+        try:
+            with legacy_engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE TABLE audit_events ("
+                        "id INTEGER PRIMARY KEY, actor_id INTEGER, action VARCHAR(80), "
+                        "target_type VARCHAR(40), target_id VARCHAR(80), details VARCHAR(4000), "
+                        "created_at DATETIME)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO audit_events VALUES "
+                        "(1, NULL, 'auth.login_failed', 'account', 'user@example.com', '{}', '2025-01-01')"
+                    )
+                )
+            migrate_audit_event_client_metadata(legacy_engine)
+            migrate_audit_event_client_metadata(legacy_engine)
+            with legacy_engine.connect() as connection:
+                columns = {
+                    column[1]
+                    for column in connection.exec_driver_sql(
+                        "PRAGMA table_info(audit_events)"
+                    )
+                }
+                existing = connection.execute(
+                    text("SELECT action, ip_address, user_agent FROM audit_events WHERE id = 1")
+                ).one()
+            self.assertIn("ip_address", columns)
+            self.assertIn("user_agent", columns)
+            self.assertEqual(existing, ("auth.login_failed", None, None))
         finally:
             legacy_engine.dispose()
 
@@ -520,15 +1186,35 @@ class SkillSwapApiTests(unittest.TestCase):
         self.assertEqual(invalid_status.status_code, 422)
 
     def test_records_persist_across_app_restart(self) -> None:
-        skill = self.create_skill()
+        group = self.create_group("Persistent group")
+        member_client, member = self.create_member()
+        self.add_group_member(group["id"], member)
+        group_skill = self.client.post(
+            f"/api/groups/{group['id']}/skills",
+            json={
+                "teacher_name": "Ari",
+                "title": "Persistent group skill",
+                "description": "Stored in the local database.",
+                "category": "Music",
+            },
+        )
+        self.assertEqual(group_skill.status_code, 201, group_skill.text)
+        member_headers = {"Authorization": member_client.headers["authorization"]}
+        member_client.close()
         self.client.close()
         with TestClient(app) as client:
-            response = client.get(
-                f"/api/skills/{skill['id']}",
+            group_response = client.get(
+                f"/api/groups/{group['id']}",
                 headers={"Authorization": f"Bearer {self.access_token}"},
             )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["title"], "Beginner guitar")
+            listings_response = client.get(
+                f"/api/groups/{group['id']}/skills",
+                headers=member_headers,
+            )
+        self.assertEqual(group_response.status_code, 200)
+        self.assertEqual(group_response.json()["name"], "Persistent group")
+        self.assertEqual(listings_response.status_code, 200)
+        self.assertEqual(listings_response.json()[0]["title"], "Persistent group skill")
 
 
 def tearDownModule() -> None:
