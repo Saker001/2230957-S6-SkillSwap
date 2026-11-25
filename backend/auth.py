@@ -18,6 +18,7 @@ from sqlalchemy import DateTime, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Field, Session, SQLModel, select
 
+from audit import record_admin_action
 from database import get_session
 from permissions import ROLE_MEMBER
 
@@ -94,6 +95,9 @@ class User(SQLModel, table=True):
     password_hash: str
     role: str = Field(default=ROLE_MEMBER, max_length=20, index=True)
     is_active: bool = Field(default=True, index=True)
+    is_banned: bool = Field(default=False, index=True)
+    ban_reason: str | None = Field(default=None, max_length=500)
+    banned_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     failed_login_attempts: int = Field(default=0)
     locked_until: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     created_at: datetime = Field(default_factory=utc_now, sa_type=DateTime(timezone=True))
@@ -187,6 +191,8 @@ class AuthResponse(BaseModel):
 
 
 class SessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     created_at: datetime
     expires_at: datetime
@@ -296,6 +302,7 @@ def get_current_user(
     if (
         user is None
         or not user.is_active
+        or user.is_banned
         or refresh_session is None
         or refresh_session.user_id != user_id
         or refresh_session.revoked_at is not None
@@ -343,6 +350,7 @@ def log_in(
         user is None
         or not valid_password
         or not user.is_active
+        or user.is_banned
         or (user.locked_until is not None and _is_future(user.locked_until))
     ):
         if user is not None and user.is_active:
@@ -352,13 +360,28 @@ def log_in(
                     user.failed_login_attempts = 0
                     user.locked_until = now + timedelta(minutes=LOGIN_LOCK_MINUTES)
                 session.add(user)
-                session.commit()
+        record_admin_action(
+            session,
+            user.id if user is not None else None,
+            "auth.login_failed",
+            "account",
+            payload.email,
+            request=request,
+        )
+        session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
     user.failed_login_attempts = 0
     user.locked_until = None
     session.add(user)
-    session.commit()
+    record_admin_action(
+        session,
+        user.id,
+        "auth.login_succeeded",
+        "user",
+        user.id,
+        request=request,
+    )
     return _create_refresh_session(session, user, request, response)
 
 
@@ -381,7 +404,7 @@ def refresh_access_token(
         raise _unauthorized()
 
     user = session.get(User, current.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.is_banned:
         _clear_refresh_cookie(response)
         raise _unauthorized()
 
@@ -422,12 +445,19 @@ def refresh_access_token(
 
 @router.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 def log_out(
+    request: Request,
     response: Response,
     session: DatabaseSession,
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE)] = None,
 ) -> Response:
     if refresh_token:
-        session.execute(
+        current = session.exec(
+            select(RefreshSession).where(
+                RefreshSession.token_hash == _token_hash(refresh_token),
+                RefreshSession.revoked_at.is_(None),
+            )
+        ).first()
+        result = session.execute(
             update(RefreshSession)
             .where(
                 RefreshSession.token_hash == _token_hash(refresh_token),
@@ -435,6 +465,15 @@ def log_out(
             )
             .values(revoked_at=utc_now())
         )
+        if current is not None and result.rowcount == 1:
+            record_admin_action(
+                session,
+                current.user_id,
+                "auth.logout",
+                "user",
+                current.user_id,
+                request=request,
+            )
         session.commit()
     _clear_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
@@ -458,6 +497,7 @@ def update_profile(payload: ProfileUpdateInput, current_user: CurrentUser, sessi
 @router.post("/api/users/me/password", status_code=status.HTTP_204_NO_CONTENT)
 def change_password(
     payload: PasswordChangeInput,
+    request: Request,
     response: Response,
     current_user: CurrentUser,
     session: DatabaseSession,
@@ -472,6 +512,14 @@ def change_password(
         update(RefreshSession)
         .where(RefreshSession.user_id == current_user.id, RefreshSession.revoked_at.is_(None))
         .values(revoked_at=utc_now())
+    )
+    record_admin_action(
+        session,
+        current_user.id,
+        "auth.password_changed",
+        "user",
+        current_user.id,
+        request=request,
     )
     session.commit()
     _clear_refresh_cookie(response)
@@ -493,6 +541,7 @@ def list_my_sessions(current_user: CurrentUser, session: DatabaseSession) -> lis
 @router.delete("/api/users/me/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_my_session(
     session_id: str,
+    request: Request,
     current_user: CurrentUser,
     session: DatabaseSession,
 ) -> Response:
@@ -507,5 +556,14 @@ def revoke_my_session(
     )
     if result.rowcount != 1:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+    record_admin_action(
+        session,
+        current_user.id,
+        "user.session_revoked",
+        "user",
+        current_user.id,
+        {"session_id": session_id},
+        request=request,
+    )
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

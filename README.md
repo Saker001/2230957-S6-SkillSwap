@@ -2,7 +2,7 @@
 
 SkillSwap is a peer-to-peer learning platform where members can share skills they teach, find skills they want to learn, and arrange learning sessions.
 
-> **Project status:** Skill and session-request CRUD, account authentication, ownership checks, and backend RBAC are implemented. Groups and the admin dashboard are later milestones.
+> **Project status:** Skill and session-request CRUD, account authentication, ownership checks, groups, and the admin dashboard are implemented, including security auditing and filtered CSV exports.
 
 ## Project goals
 
@@ -52,18 +52,22 @@ The MVP currently includes:
 - Listings are visible to signed-in members, but only their authenticated owner can modify or delete them. Legacy listings remain unowned and are excluded from member views.
 - Session requests are visible only to their learner and listing owner. Learners can update their message; listing owners can update status. Participant identity is assigned by the backend.
 - Reusable permission dependencies protect resource routes. The ownership migration adds nullable fields for existing SQLite and PostgreSQL databases without assigning legacy records to a member.
+- Administrators have a protected dashboard for user and content moderation, managed categories, account and group details, session revocation, searchable activity, failed-login insights, and filtered CSV exports.
+- Audit events record authentication outcomes, password changes, moderation, content deletion, session revocation, and exports with client IP and user-agent metadata. Export columns are explicitly selected and exclude password hashes and tokens.
+- User signup cannot grant administrator access; provision administrator roles through a trusted database operation.
 - SQLModel persistence using SQLite by default, with PostgreSQL support through `DATABASE_URL`.
 - A Vite development proxy that forwards `/api` requests to the local backend.
 - FastAPI's interactive API documentation at `/api/docs`.
 - A Vercel configuration for the frontend and backend services.
 
-Group visibility and administrative role management are not implemented. Public signup cannot assign roles; administrative operations belong to a later milestone.
+Public signup cannot assign roles. Admin endpoints independently enforce the administrator permission and prevent self-role changes, self-bans, banning administrator accounts, and demoting the last active administrator.
 
 ## Project documentation
 
 - [Product Requirements Document (PRD)](docs/01-prd.md) — product goals, users, release scope, and success criteria.
 - [Software Requirements Specification (SRS)](docs/02-srs.md) — functional, non-functional, and interface requirements.
 - [Technical Design Document (TDD)](docs/03-tdd.md) — current architecture and proposed implementation design.
+- [Final deployment report](FINAL_REPORT.md) and [PDF](FINAL_REPORT.pdf) — live status, verification checklist, and deployment evidence.
 
 ## Technology stack
 
@@ -71,7 +75,7 @@ Group visibility and administrative role management are not implemented. Public 
 - **Backend:** FastAPI, Python
 - **Communication:** REST APIs
 - **Authentication:** Argon2 password hashes, JWT access tokens, rotating httpOnly refresh cookies
-- **Authorization:** Ownership and member permissions are implemented; group and administrative permissions remain planned
+- **Authorization:** Ownership, group capabilities, and administrator permissions are enforced by the backend
 - **Database:** SQLite locally; PostgreSQL when configured through `DATABASE_URL`
 
 ## MVP API
@@ -100,6 +104,28 @@ These routes are implemented by the current MVP.
 | `GET` | `/api/users/me/sessions` | List the signed-in member's sessions |
 | `DELETE` | `/api/users/me/sessions/{session_id}` | Revoke one of the member's sessions |
 
+## Administrative API
+
+The admin dashboard is available to signed-in administrator accounts. Its API routes require the backend `admin:manage` permission, regardless of UI visibility.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/overview` | Read platform totals and recent administrative activity |
+| `GET` | `/api/admin/users` | Search, filter, and paginate accounts |
+| `GET` | `/api/admin/users/{user_id}` | View an account's listings, requests, groups, sessions, and activity |
+| `PATCH` | `/api/admin/users/{user_id}/role` | Change a user's role |
+| `POST` | `/api/admin/users/{user_id}/ban` | Ban an account with a reason and revoke its sessions |
+| `POST` | `/api/admin/users/{user_id}/unban` | Restore a banned account |
+| `POST` | `/api/admin/users/bulk-ban` | Ban multiple accounts with a reason |
+| `POST` | `/api/admin/users/bulk-unban` | Unban multiple accounts |
+| `POST` | `/api/admin/users/{user_id}/revoke-sessions` | Revoke all active sessions for an account |
+| `GET` | `/api/admin/listings`, `/api/admin/groups` | Filter and paginate platform content |
+| `DELETE` | `/api/admin/listings/{listing_id}`, `/api/admin/groups/{group_id}` | Remove a listing or group |
+| `GET`, `POST`, `PATCH`, `DELETE` | `/api/admin/categories` | Manage skill categories |
+| `GET` | `/api/admin/activity` | Search and filter audit events by text, action, actor, target, or time |
+| `GET` | `/api/admin/security/failed-logins` | Review failed-login counts by client IP and account |
+| `GET` | `/api/admin/exports/users.csv`, `/api/admin/exports/records.csv`, `/api/admin/exports/activity.csv` | Download CSV data using the selected filters |
+
 ## Authorization scope examples
 
 The backend may use scopes such as:
@@ -112,7 +138,7 @@ The backend may use scopes such as:
 - `requests:update:participant` — update your own message or the status of your listing's request
 - `requests:delete:participant` — delete a request where you are a participant
 
-These scopes are enforced by reusable FastAPI permission dependencies. Resource ownership and participation are checked in addition to the permission scope. Moderation and user-management scopes are future work.
+These scopes are enforced by reusable FastAPI permission dependencies. Resource ownership and participation are checked in addition to the permission scope. Administrative routes additionally require the `admin:manage` scope.
 
 ## Local development
 
@@ -188,7 +214,40 @@ python -m unittest discover -s tests
 
 ## Deployment
 
-The repository includes a `vercel.json` configuration for deploying the frontend and backend as Vercel services. Configure `DATABASE_URL` with a persistent PostgreSQL connection string and set stable `JWT_SECRET_KEY` and `PASSWORD_PEPPER` secrets in Vercel before deploying. The application rejects missing database configuration on Vercel instead of silently using ephemeral storage.
+The configured deployment is [SkillSwap on Vercel](https://2230957-s6-skillswap.vercel.app/). Its API documentation and OpenAPI schema are intended to be available at [`/api/docs`](https://2230957-s6-skillswap.vercel.app/api/docs) and [`/api/openapi.json`](https://2230957-s6-skillswap.vercel.app/api/openapi.json).
+
+The repository includes a `vercel.json` configuration for the frontend and backend services. Configure `DATABASE_URL` with a persistent Supabase/PostgreSQL connection string and set stable `JWT_SECRET_KEY` and `PASSWORD_PEPPER` secrets in the backend's Vercel production environment. Never put production secrets in this repository or frontend environment variables. The application rejects missing database configuration on Vercel instead of silently using ephemeral storage.
+
+At the final deployment check on 2026-11-25, the frontend returned HTTP 200 but displayed an API `Request failed (500)` error. The public `/api/health`, `/api/docs`, and `/api/openapi.json` routes each returned HTTP 500. This report does not infer a cause from the public responses; database/API-backed checks remain blocked until the Vercel backend and persistent database configuration are operational.
+
+### Safe demo-data provisioning
+
+`backend/seed_demo.py` creates or reuses two administrators, three members, one shared group with different member capabilities, and one sample group listing. It requires a PostgreSQL `DATABASE_URL`, the matching `JWT_SECRET_KEY` and `PASSWORD_PEPPER`, and environment variables for the five account emails. Password environment variables are required only for accounts not already present. The command is dry-run by default:
+
+```powershell
+python backend\seed_demo.py
+```
+
+For the first write, load the connection string, secrets, demo emails, and new-account passwords into the process environment from an approved secret manager. Then explicitly confirm the write:
+
+```powershell
+$env:DEMO_SEED_CONFIRM = "CREATE_OR_REUSE_SKILLSWAP_DEMO_DATA"
+python backend\seed_demo.py --apply
+```
+
+Required account variables are `DEMO_ADMIN_1_EMAIL`, `DEMO_ADMIN_2_EMAIL`, and `DEMO_MEMBER_1_EMAIL` through `DEMO_MEMBER_3_EMAIL`; provide the corresponding `_PASSWORD` only for accounts that need to be created. `DEMO_GROUP_NAME` is optional. Do not put secret values in command history, files, screenshots, reports, or source control. The script prints account IDs and roles, not email addresses or passwords. It never resets an existing password or changes an existing account's role or status; conflicting existing accounts, groups, or permissions stop the run. Re-running a successful seed reuses the same records.
+
+| Demo account | Role | Account ID |
+| --- | --- | --- |
+| Admin 1 | Administrator | Not provisioned; no production database access in this run |
+| Admin 2 | Administrator | Not provisioned; no production database access in this run |
+| Member 1 | Member | Not provisioned; no production database access in this run |
+| Member 2 | Member | Not provisioned; no production database access in this run |
+| Member 3 | Member | Not provisioned; no production database access in this run |
+
+The sample group is `SkillSwap final demo group` with member 1 allowed to create, member 2 allowed to edit, and member 3 allowed to assign group skills. It includes a `Demo: Introduction to Python` listing. These sample records have not been provisioned: no production database access was available in this run, and the public API currently returns HTTP 500.
+
+The live-check steps and evidence are tracked in [FINAL_REPORT.md](FINAL_REPORT.md). The student must record and submit their own 5–8 minute narrated video; no substitute recording is included.
 
 ## Configuration and security
 
@@ -196,6 +255,6 @@ Authenticated listing discovery and participant-scoped request data are implemen
 
 - Keep secrets out of source control and load them from environment variables (for example, `DATABASE_URL`, `JWT_SECRET_KEY`, and `CORS_ORIGINS`).
 - Validate required configuration when the backend starts.
-- Add group visibility and administrative role management without weakening backend ownership checks.
+- Continue extending the reusable audit event model for authentication, content, and session activity without weakening backend ownership checks.
 - Store passwords using an established password-hashing method.
 - Give each role only the permissions it needs.

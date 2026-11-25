@@ -5,7 +5,11 @@ from pathlib import Path
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 
-from migrations import migrate_resource_ownership
+from migrations import (
+    migrate_admin_user_fields,
+    migrate_audit_event_client_metadata,
+    migrate_resource_ownership,
+)
 
 
 def _database_url() -> str:
@@ -46,6 +50,8 @@ if IS_SQLITE:
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
     migrate_resource_ownership(engine)
+    migrate_admin_user_fields(engine)
+    migrate_audit_event_client_metadata(engine)
 
 
 def get_session() -> Generator[Session, None, None]:
