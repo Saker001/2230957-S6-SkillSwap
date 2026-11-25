@@ -65,7 +65,20 @@ export type AdminAuditEvent = {
   target_type: string
   target_id: string
   details: Record<string, unknown>
+  ip_address: string | null
+  user_agent: string | null
   created_at: string
+}
+
+export type FailedLoginInsight = {
+  value: string
+  count: number
+  last_seen: string
+}
+
+export type FailedLoginSummary = {
+  by_ip: FailedLoginInsight[]
+  by_account: FailedLoginInsight[]
 }
 
 export type AdminPage<T> = {
@@ -117,6 +130,31 @@ let accessToken: string | null = null
 let currentSessionId: string | null = null
 let refreshInFlight: Promise<User | null> | null = null
 
+async function responseError(response: Response): Promise<ApiError> {
+  let detail = `Request failed (${response.status})`
+  if (response.headers.get("content-type")?.includes("application/json")) {
+    const body: unknown = await response.json()
+    if (typeof body === "object" && body !== null && "detail" in body) {
+      if (typeof body.detail === "string") {
+        detail = body.detail
+      } else if (Array.isArray(body.detail)) {
+        detail = body.detail
+          .map((item) =>
+            typeof item === "object" &&
+            item !== null &&
+            "msg" in item &&
+            typeof item.msg === "string"
+              ? item.msg
+              : "",
+          )
+          .filter(Boolean)
+          .join("; ") || detail
+      }
+    }
+  }
+  return new ApiError(detail, response.status)
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
@@ -141,33 +179,45 @@ async function request<T>(
     accessToken = null
   }
 
-  if (!response.ok) {
-    let detail = `Request failed (${response.status})`
-    if (response.headers.get("content-type")?.includes("application/json")) {
-      const body: unknown = await response.json()
-      if (typeof body === "object" && body !== null && "detail" in body) {
-        if (typeof body.detail === "string") {
-          detail = body.detail
-        } else if (Array.isArray(body.detail)) {
-          detail = body.detail
-            .map((item) =>
-              typeof item === "object" &&
-              item !== null &&
-              "msg" in item &&
-              typeof item.msg === "string"
-                ? item.msg
-                : "",
-            )
-            .filter(Boolean)
-            .join("; ") || detail
-        }
-      }
-    }
-    throw new ApiError(detail, response.status)
-  }
+  if (!response.ok) throw await responseError(response)
 
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+async function downloadCsv(path: string, retryAfterRefresh = true): Promise<void> {
+  const headers = new Headers()
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`)
+  const response = await fetch(path, { headers, credentials: "include" })
+  if (response.status === 401 && retryAfterRefresh && accessToken) {
+    const user = await refreshSession()
+    if (user) return downloadCsv(path, false)
+    accessToken = null
+  }
+  if (!response.ok) throw await responseError(response)
+
+  const filename =
+    response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/i)?.[1] ??
+    "skillswap-export.csv"
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.append(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function exportQuery(
+  params: Record<string, string | boolean | number | null | undefined>,
+): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") query.set(key, String(value))
+  }
+  const search = query.toString()
+  return search ? `?${search}` : ""
 }
 
 async function refreshSession(): Promise<User | null> {
@@ -332,6 +382,30 @@ export const api = {
   deleteSessionRequest: (id: number) =>
     request<void>(`/api/session-requests/${id}`, { method: "DELETE" }),
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
+  adminActivity: (params: {
+    q?: string
+    action?: string
+    actor_id?: number
+    target_type?: string
+    since?: string
+    until?: string
+    limit?: number
+    offset?: number
+  }) => request<AdminAuditEvent[]>(`/api/admin/activity${exportQuery(params)}`),
+  adminFailedLogins: (params: { q?: string; since?: string; limit?: number }) =>
+    request<FailedLoginSummary>(`/api/admin/security/failed-logins${exportQuery(params)}`),
+  adminExportUsers: (params: { q?: string; role?: string; banned?: boolean | null }) =>
+    downloadCsv(`/api/admin/exports/users.csv${exportQuery(params)}`),
+  adminExportRecords: (params: { q?: string; category?: string }) =>
+    downloadCsv(`/api/admin/exports/records.csv${exportQuery(params)}`),
+  adminExportActivity: (params: {
+    q?: string
+    action?: string
+    actor_id?: number
+    target_type?: string
+    since?: string
+    until?: string
+  }) => downloadCsv(`/api/admin/exports/activity.csv${exportQuery(params)}`),
   adminUsers: (params: {
     q?: string
     role?: string
