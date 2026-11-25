@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from sqlmodel import Session, select
 
+from auth import CurrentUser, router as auth_router
 from database import create_db_and_tables, get_session
 from models import (
     SessionRequest,
@@ -30,6 +31,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     redoc_url=None,
 )
+app.include_router(auth_router)
 
 
 @app.get("/api/health")
@@ -49,6 +51,7 @@ def hello(name: str = "World") -> dict[str, str]:
 )
 def create_skill(
     payload: SkillListingCreate,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> SkillListing:
     skill = SkillListing.model_validate(payload)
@@ -60,6 +63,7 @@ def create_skill(
 
 @app.get("/api/skills", response_model=list[SkillListingRead])
 def list_skills(
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> list[SkillListing]:
     return list(session.exec(select(SkillListing).order_by(SkillListing.id.desc())).all())
@@ -68,6 +72,7 @@ def list_skills(
 @app.get("/api/skills/{skill_id}", response_model=SkillListingRead)
 def read_skill(
     skill_id: int,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> SkillListing:
     skill = session.get(SkillListing, skill_id)
@@ -80,6 +85,7 @@ def read_skill(
 def update_skill(
     skill_id: int,
     payload: SkillListingUpdate,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> SkillListing:
     skill = session.get(SkillListing, skill_id)
@@ -95,6 +101,7 @@ def update_skill(
 @app.delete("/api/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_skill(
     skill_id: int,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> Response:
     skill = session.get(SkillListing, skill_id)
@@ -112,6 +119,7 @@ def delete_skill(
 )
 def create_session_request(
     payload: SessionRequestCreate,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> SessionRequest:
     if session.get(SkillListing, payload.skill_listing_id) is None:
@@ -125,6 +133,7 @@ def create_session_request(
 
 @app.get("/api/session-requests", response_model=list[SessionRequestRead])
 def list_session_requests(
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> list[SessionRequest]:
     return list(
@@ -135,6 +144,7 @@ def list_session_requests(
 @app.get("/api/session-requests/{request_id}", response_model=SessionRequestRead)
 def read_session_request(
     request_id: int,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> SessionRequest:
     request = session.get(SessionRequest, request_id)
@@ -147,6 +157,7 @@ def read_session_request(
 def update_session_request(
     request_id: int,
     payload: SessionRequestUpdate,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> SessionRequest:
     request = session.get(SessionRequest, request_id)
@@ -169,6 +180,7 @@ def update_session_request(
 )
 def delete_session_request(
     request_id: int,
+    current_user: CurrentUser,
     session: Session = Depends(get_session),
 ) -> Response:
     request = session.get(SessionRequest, request_id)

@@ -8,7 +8,7 @@
 | Status | Draft |
 | Related docs | [Product Requirements Document (PRD)](01-prd.md), [Software Requirements Specification (SRS)](02-srs.md) |
 
-Sections and tables are marked **MVP** or **Beta**. The MVP implementation below covers skill listing and session request CRUD; Beta extends it with authentication and permissions.
+Sections and tables are marked **MVP** or **Beta**. The current implementation includes skill and session-request CRUD plus account authentication. Ownership/RBAC, groups, and administration are the remaining Beta work.
 
 **Documents in this set**
 
@@ -21,8 +21,8 @@ Sections and tables are marked **MVP** or **Beta**. The MVP implementation below
 ## 1. Overview
 
 - **MVP:** React + TypeScript and FastAPI + Python implement persistent skill listing and session request CRUD over REST.
-- **Beta:** Add accounts, profiles, member/moderator/administrator roles, backend permission scopes, moderation, administration, and deployment.
-- **Current status:** The repository includes MVP CRUD endpoints and UI. SQLite is the local database; PostgreSQL is supported through the `DATABASE_URL` environment variable. Authentication and Beta authorization are not implemented.
+- **Beta:** Add account authorization, member/group permissions, moderation, administration, and complete final-demo deployment.
+- **Current status:** The repository includes CRUD and authentication endpoints and UI. SQLite is the local database; PostgreSQL is selected through `DATABASE_URL`. Ownership/RBAC and the admin dashboard remain to be implemented.
 
 ## 2. Tech stack
 
@@ -38,10 +38,12 @@ Sections and tables are marked **MVP** or **Beta**. The MVP implementation below
 | PostgreSQL driver | Psycopg 3 | SQLModel/SQLAlchemy PostgreSQL connectivity | MVP |
 | Persistence layer | SQLModel session dependency | Reuse a request-scoped database session | MVP |
 | Hosting | Vercel configuration is present | Existing config describes separate frontend and backend services; verify compatibility before Beta deployment | Beta |
-| Password hashing | Maintained password-hashing library (choice pending) | Never store plaintext passwords | Beta |
-| Authentication | Token or secure-cookie design (choice pending) | Verify identity on protected API requests | Beta |
+| Password hashing | Argon2id with server-side HMAC pepper | Never store plaintext passwords | Beta |
+| Access authentication | HS256 JWT, 15-minute expiry, bearer header | Verify identity on protected API requests | Beta |
+| Refresh sessions | Random refresh token, SHA-256 hash in database, rotating httpOnly cookie | Revoke sessions and invalidate access tokens on revocation | Beta |
+| Auth dependencies | FastAPI bearer dependency with live user/session lookup | Reject invalid, expired, revoked, or inactive sessions | Beta |
 
-The MVP creates tables from SQLModel metadata at API startup. A versioned migration framework is deferred until schema evolution requires it.
+New SQLModel tables are created at API startup. Existing SQL table changes require an explicit migration plan before adding owner/group fields.
 
 ## 3. Architecture
 
@@ -59,8 +61,8 @@ In local development, Vite proxies `/api` to the FastAPI server, as configured i
 The target backend request flow is:
 
 1. Router receives the HTTP request and validates its payload with a Pydantic schema.
-2. (Beta) Authentication dependency resolves the caller's identity from verified credentials.
-3. Business logic validates resource references and allowed state values. Beta adds ownership, participant, role, and scope checks.
+2. The authentication dependency validates the JWT and its active refresh-session record and resolves the caller's user from the database.
+3. Business logic validates resource references and allowed state values. The next Beta milestone adds ownership, group, role, and scope checks.
 4. Persistence boundary reads or writes the records.
 5. Router returns a documented response schema and HTTP status.
 
@@ -81,7 +83,7 @@ sequenceDiagram
     R-->>C: 201 Created + JSON
 ```
 
-The MVP is a shared demonstration with no authentication or ownership checks. Beta must derive ownership and participant identity from verified credentials, never from arbitrary client-supplied identifiers.
+Authentication now protects the API, but the current CRUD model is still shared. The next Beta milestone must derive ownership and participant identity from verified credentials, never from arbitrary client-supplied identifiers.
 
 ### 3.2 Authentication and authorization flow — Beta
 
@@ -103,7 +105,7 @@ sequenceDiagram
     A-->>C: JSON response
 ```
 
-The credential transport, token/cookie settings, expiration, and refresh behavior remain an implementation decision. Choose and document them before Beta authentication work.
+Access tokens are short-lived JWTs kept only in frontend memory. Refresh tokens are random, hashed in the database, rotated on refresh, and delivered in an httpOnly, SameSite=Lax cookie. Logout, password change, and session revocation invalidate database sessions; each protected API request checks that its session remains active.
 
 ## 4. Project structure
 
@@ -113,9 +115,10 @@ The implementation is intentionally small and organized around the current featu
 backend/
   main.py
   database.py                  # engine, DATABASE_URL, request-scoped sessions
+  auth.py                      # user/session tables, JWT, password hashing, auth routes
   models.py                    # SQLModel tables and API schemas
   tests/
-    test_api.py                # CRUD, validation, cascade, and persistence tests
+    test_api.py                # CRUD, auth, validation, cascade, and persistence tests
 frontend/
   src/
     api.ts                     # typed REST client
@@ -155,7 +158,8 @@ docs/
 
 | Entity | Key data and relationships | Release |
 |---|---|---|
-| `User` | Unique email, password hash, display name, role, profile data, timestamps | Beta |
+| `User` | Unique email, Argon2id password hash, display name, role, active/lockout fields, timestamps | Beta |
+| `RefreshSession` | User, hashed refresh token, expiry/revocation/replacement timestamps, device metadata | Beta |
 | `Category` | Unique name, description | Beta |
 | `SkillListing` | Owner, category, title, description, availability/visibility, timestamps | MVP/Beta |
 | `SessionRequest` | Skill listing foreign key, learner name, message, status, created timestamp | MVP |
@@ -164,7 +168,15 @@ docs/
 
 Use foreign keys and database constraints for required references and unique account email. Consider indexes for listing availability/category and session request participants/status. Decide cascade, archival, and deletion behavior before writing migrations.
 
-### 5.4 Schemas
+### 5.4 Authentication schemas and secrets
+
+- Signup accepts email, display name, and a password of at least 12 characters. Role is assigned by the server and cannot be selected by public signup.
+- Login uses a generic invalid-credentials response and applies a temporary account lock after repeated failed attempts.
+- Profile and password-change schemas only expose permitted fields. Password changes require the current password and revoke all sessions.
+- `JWT_SECRET_KEY` and `PASSWORD_PEPPER` are independent secrets of at least 32 characters. Production must supply stable values through Vercel environment configuration; local development may use temporary generated values.
+- Never return password hashes or refresh-token hashes through API response schemas.
+
+### 5.6 Schemas
 
 Keep API schemas separate by operation where fields differ:
 
@@ -173,7 +185,7 @@ Keep API schemas separate by operation where fields differ:
 - `SessionRequestCreate`: listing identifier, learner name, and request message.
 - `SessionRequestUpdate`: explicitly allowed request fields, including status.
 - `SessionRequestRead`: request fields and identifier.
-- Beta account/profile schemas must never expose password hashes or credential secrets.
+- Account/profile schemas must never expose password hashes or credential secrets.
 
 ## 6. REST API design
 
@@ -194,24 +206,28 @@ All application routes use the `/api` prefix to match the Vite proxy and Vercel 
 | `PATCH` | `/api/session-requests/{request_id}` | Update request fields or status | `200` |
 | `DELETE` | `/api/session-requests/{request_id}` | Delete a request | `204` |
 
-The MVP has no authentication; both resource collections are shared demonstration data. Do not treat the MVP as providing owner-only access.
+Every resource endpoint requires a valid authenticated session. Records are still shared across authenticated accounts until owner checks are added in the next Beta milestone. Do not treat this interim state as owner-only access.
 
 ### 6.2 Endpoints — Beta
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| `POST` | `/api/auth/register` | Register a new account | `201` |
-| `POST` | `/api/auth/token` | Authenticate and establish credentials | `200` |
-| `POST` | `/api/auth/logout` | Sign out/invalidate credentials, per selected design | `204` |
+| `POST` | `/api/auth/signup` | Register a new member account | `201` |
+| `POST` | `/api/auth/login` | Authenticate and issue short-lived JWT plus refresh cookie | `200` |
+| `POST` | `/api/auth/refresh` | Rotate refresh session and issue a new JWT | `200` |
+| `POST` | `/api/auth/logout` | Revoke the current refresh session | `204` |
 | `GET` | `/api/users/me` | Retrieve the authenticated member's profile | `200` |
 | `PATCH` | `/api/users/me` | Update permitted profile fields | `200` |
+| `POST` | `/api/users/me/password` | Change password and revoke all sessions | `204` |
+| `GET` | `/api/users/me/sessions` | List the member's refresh sessions | `200` |
+| `DELETE` | `/api/users/me/sessions/{session_id}` | Revoke one of the member's sessions | `204` |
 | `GET` | `/api/reports` | Review reports | `200`, moderator/admin |
 | `PATCH` | `/api/reports/{report_id}` | Resolve report and optionally hide listing | `200`, moderator/admin |
 | `GET` | `/api/admin/users` | List/manage user accounts | `200`, administrator |
 | `PATCH` | `/api/admin/users/{user_id}` | Update permitted user status/role | `200`, administrator |
 | `GET` | `/api/admin/categories` | Manage categories | `200`, administrator |
 
-Beta endpoints require verified authentication and the applicable role/scope. Final route set should be limited to what is needed for the demo.
+Authentication and profile endpoints are implemented. The remaining Beta admin/group endpoints require verified identity and the applicable role/scope; final route set should be limited to what is needed for the demo.
 
 ### 6.3 Examples
 

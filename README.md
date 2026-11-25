@@ -2,7 +2,7 @@
 
 SkillSwap is a peer-to-peer learning platform where members can share skills they teach, find skills they want to learn, and arrange learning sessions.
 
-> **Project status:** MVP CRUD for skill listings and session requests is implemented. Authentication, RBAC, and Beta features remain planned.
+> **Project status:** Skill and session-request CRUD plus account authentication are implemented. Fine-grained ownership/RBAC, groups, and the admin dashboard are the next milestones.
 
 ## Project goals
 
@@ -23,7 +23,8 @@ SkillSwap is a peer-to-peer learning platform where members can share skills the
 
 ### Beta — Final demo
 
-- Register and sign in.
+- Register, sign in, manage a profile, and change a password.
+- Use short-lived access tokens and rotating, revocable refresh sessions.
 - Give members, moderators, and administrators distinct permissions.
 - Restrict actions using authorization scopes.
 - Provide a member profile dashboard.
@@ -45,12 +46,15 @@ The MVP currently includes:
 
 - Skill listing CRUD in the React frontend and FastAPI REST API.
 - Session request CRUD in the React frontend and FastAPI REST API.
+- Account signup, login/logout, profile editing, password changes, and session revocation.
+- Argon2 password hashing with a server-side pepper, short-lived JWT access tokens, and rotating httpOnly refresh cookies.
+- Protected API routes reject missing, invalid, expired, revoked, or inactive-user sessions.
 - SQLModel persistence using SQLite by default, with PostgreSQL support through `DATABASE_URL`.
 - A Vite development proxy that forwards `/api` requests to the local backend.
 - FastAPI's interactive API documentation at `/api/docs`.
 - A Vercel configuration for the frontend and backend services.
 
-Authentication, authorization, member profiles, moderation, and administration are planned for Beta. The MVP has no sign-in, so listing and request data is shared and the frontend does not enforce ownership.
+The current authentication milestone protects API access but does not yet enforce record ownership or provide admin/group permissions. Until the next RBAC milestone is complete, signed-in accounts can still see shared SkillSwap records. Do not enter private data.
 
 ## Project documentation
 
@@ -63,7 +67,8 @@ Authentication, authorization, member profiles, moderation, and administration a
 - **Frontend:** React, TypeScript, Vite
 - **Backend:** FastAPI, Python
 - **Communication:** REST APIs
-- **Authentication and authorization:** Planned
+- **Authentication:** Argon2 password hashes, JWT access tokens, rotating httpOnly refresh cookies
+- **Authorization:** Ownership, group permissions, and administrative roles are in progress
 - **Database:** SQLite locally; PostgreSQL when configured through `DATABASE_URL`
 
 ## MVP API
@@ -82,6 +87,15 @@ These routes are implemented by the current MVP.
 | `GET` | `/api/session-requests/{request_id}` | View one session request |
 | `PATCH` | `/api/session-requests/{request_id}` | Update a request or its status |
 | `DELETE` | `/api/session-requests/{request_id}` | Delete a session request |
+| `POST` | `/api/auth/signup` | Create a member account |
+| `POST` | `/api/auth/login` | Sign in and issue an access token |
+| `POST` | `/api/auth/refresh` | Rotate the refresh session and issue a new access token |
+| `POST` | `/api/auth/logout` | Revoke the current refresh session |
+| `GET` | `/api/users/me` | Read the signed-in member's profile |
+| `PATCH` | `/api/users/me` | Update the signed-in member's profile |
+| `POST` | `/api/users/me/password` | Change password and revoke sessions |
+| `GET` | `/api/users/me/sessions` | List the signed-in member's sessions |
+| `DELETE` | `/api/users/me/sessions/{session_id}` | Revoke one of the member's sessions |
 
 ## Authorization scope examples
 
@@ -107,6 +121,17 @@ These are examples; final scope names should match the authorization implementat
 ### Start the backend
 
 From the repository root, create a virtual environment and install the backend dependencies. SQLite is used by default and the database file is created at `backend/skillswap.db`.
+
+Set two independent secrets before starting the API. For local testing, PowerShell can generate them:
+
+```powershell
+$env:JWT_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
+$env:PASSWORD_PEPPER = python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+`.env.example` lists the required variable names and contains placeholders only; it is not a source of production secrets.
+
+In production, configure stable `JWT_SECRET_KEY` and `PASSWORD_PEPPER` values in Vercel's backend environment settings. Rotating the pepper invalidates existing password hashes; rotating the JWT secret invalidates active access tokens.
 
 **Windows PowerShell:**
 
@@ -148,7 +173,7 @@ npm run dev
 
 Open the local address printed by Vite (typically `http://localhost:5173`). The Vite development server forwards `/api` requests to the backend on port `8000`.
 
-PostgreSQL support is available for a hosted database. Add `DATABASE_URL` to the backend service's production environment configuration before deployment; do not commit credentials.
+PostgreSQL support is available for a hosted database. Add `DATABASE_URL`, `JWT_SECRET_KEY`, and `PASSWORD_PEPPER` to the backend service's Vercel environment configuration before deployment; do not commit credentials.
 
 ### Backend API tests
 
@@ -160,7 +185,7 @@ python -m unittest discover -s tests
 
 ## Deployment
 
-The repository includes a `vercel.json` configuration for deploying the frontend and backend as Vercel services. Configure `DATABASE_URL` in the backend service with a PostgreSQL connection string before deploying; Vercel's local filesystem is not persistent storage. Keep the connection string in Vercel environment settings, never in source control.
+The repository includes a `vercel.json` configuration for deploying the frontend and backend as Vercel services. Configure `DATABASE_URL` with a persistent PostgreSQL connection string and set stable `JWT_SECRET_KEY` and `PASSWORD_PEPPER` secrets in Vercel before deploying. The application rejects missing database configuration on Vercel instead of silently using ephemeral storage.
 
 ## Configuration and security
 

@@ -27,7 +27,7 @@ This document specifies SkillSwap's externally observable requirements for the M
 ### 1.2 Scope
 
 - **MVP:** users perform full CRUD on skill listings and session requests through the React UI and REST APIs. The application runs locally with persistent storage.
-- **Beta:** registered members use profiles and authenticated APIs; member, moderator, and administrator actions are authorized on the backend.
+- **Beta:** registered members use authenticated APIs and profiles; ownership/RBAC, groups, and administrative actions are being delivered in follow-up milestones.
 - The system uses a React + TypeScript frontend and FastAPI + Python backend.
 - Out of scope: payments, real-time chat/video, mobile applications, and calendar integrations. See [PRD, section 5](01-prd.md#5-scope).
 
@@ -56,14 +56,14 @@ flowchart LR
     API -->|Beta identity and authorization| Auth[Account and permission services]
 ```
 
-The MVP provides listing and session-request CRUD through the React frontend and FastAPI API. SQLite is the local default, and PostgreSQL can be selected with `DATABASE_URL`. Authentication, profiles, roles, and Beta permissions are not implemented.
+The MVP provides listing and session-request CRUD through the React frontend and FastAPI API. The current Beta authentication milestone adds accounts, profiles, password changes, and revocable sessions. SQLite is the local default, and PostgreSQL is configured with `DATABASE_URL`. Ownership, group permissions, and the admin dashboard remain in progress.
 
 ### 2.2 Users and roles
 
 | User class / role | Release | Description |
 |---|---|---|
-| Visitor | MVP | Browses public skill listings and views listing details. |
-| Member | MVP/Beta | Can teach and learn. MVP data is shared without sign-in; Beta members have authenticated accounts and ownership checks. |
+| Visitor | MVP/Beta | Can register or sign in; application data and protected APIs require authentication. |
+| Member | MVP/Beta | Can teach and learn. Current records remain shared between signed-in members until ownership checks are implemented. |
 | Moderator | Beta | Reviews reports and hides inappropriate listings. |
 | Administrator | Beta | Manages users, categories, and listings across the platform. |
 
@@ -122,14 +122,14 @@ flowchart LR
 - The frontend shall use React and TypeScript; the backend shall use FastAPI and Python.
 - The frontend and backend communicate through JSON REST APIs.
 - Local development uses SQLite; PostgreSQL is supported through `DATABASE_URL` for hosted persistence.
-- The MVP must be demonstrable locally. Deployment is planned for Beta.
-- Authentication is intentionally deferred to Beta.
+- The MVP must be demonstrable locally; the final project must work on its deployed Vercel URLs.
+- Authentication is implemented as a Beta milestone; ownership/RBAC and administration remain required.
 
 ### 2.5 Assumptions
 
 - A member may be both a teacher and a learner.
 - A request represents interest in a listing; time coordination can happen outside the application.
-- The MVP is a shared demonstration with no authenticated owner or participant checks.
+- Existing MVP data is shared between authenticated accounts until owner and participant checks are implemented.
 - Production ownership and role checks require authenticated identity and must be enforced by the backend.
 
 ## 3. Functional requirements
@@ -161,10 +161,13 @@ flowchart LR
 
 | ID | Requirement |
 |---|---|
-| SRS-F13 | A visitor shall be able to register with valid account details. |
-| SRS-F14 | A registered member shall be able to authenticate and sign out. |
-| SRS-F15 | An authenticated member shall be able to retrieve and update permitted fields in their own profile. |
-| SRS-F16 | The backend shall associate each authenticated operation with the identity from verified credentials, not a client-supplied user identifier. |
+| SRS-F13 | A visitor shall be able to register with a valid email, display name, and password of at least 12 characters. (Implemented) |
+| SRS-F14 | A registered member shall be able to authenticate and sign out; passwords shall be stored as Argon2id hashes with a server-side pepper. (Implemented) |
+| SRS-F15 | An authenticated member shall be able to retrieve/update their profile, change their password after confirming the current password, and list/revoke their sessions. (Implemented) |
+| SRS-F16 | The backend shall associate each authenticated operation with identity from a verified short-lived JWT and an active server-side session, not a client-supplied user identifier. (Implemented) |
+| SRS-F16a | Refresh tokens shall be random, stored only as hashes, rotated on refresh, and delivered in an httpOnly cookie. Logout, password change, and revocation shall invalidate sessions. (Implemented) |
+| SRS-F16b | Missing, invalid, tampered, expired, revoked, or inactive-user credentials shall not authorize protected endpoints. (Implemented) |
+| SRS-F16c | Public signup shall not allow a user to assign themselves an administrator role. (Implemented) |
 
 ### 3.4 Roles (RBAC) and administration — Beta
 
@@ -201,7 +204,7 @@ stateDiagram-v2
     declined --> [*]
 ```
 
-The MVP does not include scheduling. Request statuses can be edited as part of the shared demonstration; there is no authentication or ownership enforcement yet.
+The MVP does not include scheduling. Request statuses can be edited by authenticated users; ownership and participant restrictions remain unimplemented.
 
 ### 3.7 Permission matrix — Beta
 

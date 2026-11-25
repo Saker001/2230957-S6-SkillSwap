@@ -45,7 +45,7 @@ The project is delivered in two focused releases:
 1. **MVP (mid-term):** a usable local application for browsing and managing skill listings and sending/responding to learning session requests.
 2. **Beta (final):** a secure multi-user application with authentication, member profiles, role-based permissions, moderator/admin capabilities, and deployment.
 
-The MVP now implements skill listing and session request CRUD in the React frontend and FastAPI backend. Beta features in this document remain planned.
+The MVP implements skill listing and session request CRUD. The Beta authentication milestone adds account signup/sign-in, profiles, password changes, and revocable sessions. Ownership, groups, RBAC, administration, and final report artifacts remain to be completed.
 
 ## 2. Problem statement
 
@@ -75,7 +75,7 @@ People have skills they can teach and subjects they want to learn, but they may 
 | Moderator | Review reports and hide inappropriate listings. | Beta |
 | Administrator | Manage users, categories, and listings across the platform. | Beta |
 
-A member can both teach and learn. The MVP has no production authentication; any demo ownership mechanism must not be presented as secure account-based authorization. In Beta, identity and permissions are enforced by the backend.
+A member can both teach and learn. Authentication is implemented, but listing and request ownership and role permissions are not yet enforced. Do not treat sign-in alone as owner-only authorization; backend ownership checks are part of the next Beta milestone.
 
 ## 5. Scope
 

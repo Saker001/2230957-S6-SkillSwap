@@ -9,11 +9,12 @@ from sqlmodel import Session, SQLModel, create_engine
 def _database_url() -> str:
     database_url = os.getenv("DATABASE_URL")
     if database_url:
-        if database_url.startswith("postgres://"):
-            return database_url.replace("postgres://", "postgresql+psycopg://", 1)
-        if database_url.startswith("postgresql://"):
-            return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        return database_url
+        normalized = database_url.strip()
+        if normalized.startswith("postgres://"):
+            return normalized.replace("postgres://", "postgresql+psycopg://", 1)
+        if normalized.startswith("postgresql://"):
+            return normalized.replace("postgresql://", "postgresql+psycopg://", 1)
+        return normalized
 
     if os.getenv("VERCEL"):
         raise RuntimeError("Set DATABASE_URL to a persistent database for Vercel deployments.")

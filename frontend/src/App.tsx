@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react"
-import { api, type SessionRequest, type SkillListing } from "./api"
+import { api, type SessionRequest, type SkillListing, type User, type UserSession } from "./api"
 
 const emptySkill = {
   teacher_name: "",
@@ -15,7 +15,25 @@ const emptyRequest = {
   status: "pending" as SessionRequest["status"],
 }
 
+const emptyAuthForm = {
+  email: "",
+  display_name: "",
+  password: "",
+}
+
+const emptyPasswordForm = {
+  current_password: "",
+  new_password: "",
+}
+
 export default function App() {
+  const [authStatus, setAuthStatus] = useState<"restoring" | "guest" | "authenticated">("restoring")
+  const [user, setUser] = useState<User | null>(null)
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login")
+  const [authForm, setAuthForm] = useState(emptyAuthForm)
+  const [profileName, setProfileName] = useState("")
+  const [passwordForm, setPasswordForm] = useState(emptyPasswordForm)
+  const [userSessions, setUserSessions] = useState<UserSession[]>([])
   const [skills, setSkills] = useState<SkillListing[]>([])
   const [sessionRequests, setSessionRequests] = useState<SessionRequest[]>([])
   const [skillForm, setSkillForm] = useState(emptySkill)
@@ -28,22 +46,135 @@ export default function App() {
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
 
+  useEffect(() => {
+    let active = true
+    api.restoreSession()
+      .then((restoredUser) => {
+        if (!active) return
+        setUser(restoredUser)
+        setProfileName(restoredUser?.display_name ?? "")
+        setAuthStatus(restoredUser ? "authenticated" : "guest")
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        setError(err instanceof Error ? err.message : "Could not restore your session.")
+        setAuthStatus("guest")
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
   const refreshData = useCallback(async () => {
-    const [skillRows, requestRows] = await Promise.all([
+    const [skillRows, requestRows, sessions] = await Promise.all([
       api.listSkills(),
       api.listSessionRequests(),
+      api.listSessions(),
     ])
     setSkills(skillRows)
     setSessionRequests(requestRows)
+    setUserSessions(sessions)
   }, [])
 
   useEffect(() => {
+    if (authStatus !== "authenticated") return
+    setLoading(true)
     refreshData()
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Could not load SkillSwap data."),
       )
       .finally(() => setLoading(false))
-  }, [refreshData])
+  }, [authStatus, refreshData])
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError("")
+    setNotice("")
+    try {
+      if (authMode === "signup") {
+        await api.signUp(authForm)
+      }
+      const signedInUser = await api.logIn({
+        email: authForm.email,
+        password: authForm.password,
+      })
+      setUser(signedInUser)
+      setProfileName(signedInUser.display_name)
+      setAuthStatus("authenticated")
+      setAuthForm(emptyAuthForm)
+      setNotice(authMode === "signup" ? "Account created and signed in." : "Signed in successfully.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not sign in.")
+    }
+  }
+
+  async function handleSignOut() {
+    setError("")
+    try {
+      await api.logOut()
+      setUser(null)
+      setUserSessions([])
+      setAuthStatus("guest")
+      setNotice("You have signed out.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not sign out.")
+    }
+  }
+
+  async function handleProfileSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError("")
+    setNotice("")
+    try {
+      const updatedUser = await api.updateProfile(profileName)
+      setUser(updatedUser)
+      setProfileName(updatedUser.display_name)
+      setNotice("Profile updated.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update your profile.")
+    }
+  }
+
+  async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError("")
+    setNotice("")
+    try {
+      await api.changePassword(passwordForm.current_password, passwordForm.new_password)
+      setPasswordForm(emptyPasswordForm)
+      setUser(null)
+      setUserSessions([])
+      setAuthStatus("guest")
+      setNotice("Password changed. Sign in again with your new password.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change your password.")
+    }
+  }
+
+  async function handleRevokeSession(sessionId: string) {
+    setError("")
+    setNotice("")
+    try {
+      const currentSession = api.isCurrentSession(sessionId)
+      await api.revokeSession(sessionId)
+      if (currentSession) {
+        await api.logOut()
+        setUser(null)
+        setUserSessions([])
+        setAuthStatus("guest")
+        setNotice("This session was revoked. Sign in again to continue.")
+        return
+      }
+      setUserSessions((sessions) =>
+        sessions.map((session) =>
+          session.id === sessionId ? { ...session, revoked_at: new Date().toISOString() } : session,
+        ),
+      )
+      setNotice("Session revoked.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not revoke that session.")
+    }
+  }
 
   async function handleSkillSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -166,6 +297,91 @@ export default function App() {
     }
   }
 
+  if (authStatus === "restoring") {
+    return (
+      <main className="app-shell">
+        <p className="muted" role="status">Restoring your SkillSwap session...</p>
+      </main>
+    )
+  }
+
+  if (!user) {
+    return (
+      <main className="app-shell">
+        <header className="hero">
+          <p className="eyebrow">Learn from each other</p>
+          <h1>SkillSwap</h1>
+          <p className="intro">Sign in or create an account to continue.</p>
+        </header>
+        {error && <p className="alert error" role="alert">{error}</p>}
+        {notice && <p className="alert success" role="status">{notice}</p>}
+        <section className="panel auth-panel" aria-labelledby="auth-heading">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Your account</p>
+              <h2 id="auth-heading">{authMode === "login" ? "Sign in" : "Create account"}</h2>
+            </div>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => {
+                setAuthMode(authMode === "login" ? "signup" : "login")
+                setError("")
+              }}
+            >
+              {authMode === "login" ? "Create account" : "I already have an account"}
+            </button>
+          </div>
+          <form className="form-card" onSubmit={handleAuthSubmit}>
+            {authMode === "signup" && (
+              <label>
+                Display name
+                <input
+                  required
+                  minLength={1}
+                  maxLength={80}
+                  autoComplete="name"
+                  value={authForm.display_name}
+                  onChange={(event) =>
+                    setAuthForm({ ...authForm, display_name: event.target.value })
+                  }
+                />
+              </label>
+            )}
+            <label>
+              Email
+              <input
+                required
+                type="email"
+                autoComplete="email"
+                value={authForm.email}
+                onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })}
+              />
+            </label>
+            <label>
+              Password
+              <input
+                required
+                type="password"
+                minLength={authMode === "signup" ? 12 : 1}
+                maxLength={128}
+                autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                value={authForm.password}
+                onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
+              />
+              {authMode === "signup" && (
+                <span className="muted">Use at least 12 characters.</span>
+              )}
+            </label>
+            <button className="primary" type="submit">
+              {authMode === "login" ? "Sign in" : "Create account"}
+            </button>
+          </form>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="app-shell">
       <header className="hero">
@@ -174,6 +390,10 @@ export default function App() {
         <p className="intro">
           Share what you know, discover a skill to learn, and arrange a session.
         </p>
+        <div className="account-toolbar">
+          <span>Signed in as <strong>{user.display_name}</strong> ({user.role})</span>
+          <button className="secondary" type="button" onClick={handleSignOut}>Sign out</button>
+        </div>
       </header>
 
       {error && <p className="alert error" role="alert">{error}</p>}
@@ -421,8 +641,93 @@ export default function App() {
           </div>
         )}
       </section>
+      <section className="panel" aria-labelledby="account-heading">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Account settings</p>
+            <h2 id="account-heading">Profile and security</h2>
+          </div>
+        </div>
+        <div className="content-grid account-grid">
+          <form className="form-card" onSubmit={handleProfileSubmit}>
+            <h3>Update profile</h3>
+            <label>
+              Display name
+              <input
+                required
+                minLength={1}
+                maxLength={80}
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+              />
+            </label>
+            <button className="primary" type="submit">Save profile</button>
+          </form>
+          <form className="form-card" onSubmit={handlePasswordSubmit}>
+            <h3>Change password</h3>
+            <label>
+              Current password
+              <input
+                required
+                type="password"
+                autoComplete="current-password"
+                value={passwordForm.current_password}
+                onChange={(event) =>
+                  setPasswordForm({ ...passwordForm, current_password: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              New password
+              <input
+                required
+                type="password"
+                minLength={12}
+                maxLength={128}
+                autoComplete="new-password"
+                value={passwordForm.new_password}
+                onChange={(event) =>
+                  setPasswordForm({ ...passwordForm, new_password: event.target.value })
+                }
+              />
+            </label>
+            <button className="primary" type="submit">Change password</button>
+          </form>
+        </div>
+        <div className="session-list">
+          <h3>Your sessions</h3>
+          {userSessions.length === 0 ? (
+            <p className="muted">No sessions found.</p>
+          ) : (
+            userSessions.map((session) => (
+              <div className="session-row" key={session.id}>
+                <div>
+                  <strong>
+                    {session.user_agent ?? "Unknown device"}
+                    {api.isCurrentSession(session.id) ? " · This device" : ""}
+                  </strong>
+                  <p className="muted">
+                    Started {new Date(session.created_at).toLocaleString()}
+                    {session.ip_address ? ` · ${session.ip_address}` : ""}
+                  </p>
+                  {session.revoked_at && <span className="tag status-declined">Revoked</span>}
+                </div>
+                {!session.revoked_at && (
+                  <button
+                    className="danger"
+                    type="button"
+                    onClick={() => handleRevokeSession(session.id)}
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </section>
       <footer>
-        Shared data, no sign-in. Authentication and ownership controls are planned for Beta.
+        Signed in as {user.email}. Listing ownership and role-based permissions are managed in the next security milestone.
       </footer>
     </main>
   )
