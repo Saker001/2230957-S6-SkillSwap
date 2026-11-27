@@ -67,7 +67,7 @@ Public signup cannot assign roles. Admin endpoints independently enforce the adm
 - [Product Requirements Document (PRD)](docs/01-prd.md) — product goals, users, release scope, and success criteria.
 - [Software Requirements Specification (SRS)](docs/02-srs.md) — functional, non-functional, and interface requirements.
 - [Technical Design Document (TDD)](docs/03-tdd.md) — current architecture and proposed implementation design.
-- [Final deployment report](FINAL_REPORT.md) and [PDF](FINAL_REPORT.pdf) — live status, verification checklist, and deployment evidence.
+- [Final project report](docs/FINAL_REPORT.md) — project details, verification status, and submission evidence notes.
 
 ## Technology stack
 
@@ -247,7 +247,7 @@ Required account variables are `DEMO_ADMIN_1_EMAIL`, `DEMO_ADMIN_2_EMAIL`, and `
 
 The sample group is `SkillSwap final demo group` with member 1 allowed to create, member 2 allowed to edit, and member 3 allowed to assign group skills. It includes a `Demo: Introduction to Python` listing. These sample records have not been provisioned: no production database access was available in this run, and the public API currently returns HTTP 500.
 
-The live-check steps and evidence are tracked in [FINAL_REPORT.md](FINAL_REPORT.md). The student must record and submit their own 5–8 minute narrated video; no substitute recording is included.
+The deployment verification and evidence notes are tracked in [docs/FINAL_REPORT.md](docs/FINAL_REPORT.md). The student must record and submit their own 5–8 minute narrated video; no substitute recording is included.
 
 ## Configuration and security
 

@@ -1,14 +1,31 @@
-# SkillSwap — Final Project Report
+# Independent University, Bangladesh
+## CSE309 Web Application & Internet
 
-| Field | Value |
-|---|---|
-| Student | [Enter student name] |
-| Course / section | [Enter course and section] |
-| Instructor | [Enter instructor name] |
-| Report date | 27 November 2026 |
-| Project repository | [Saker001/2230957-S6-SkillSwap](https://github.com/Saker001/2230957-S6-SkillSwap) |
-| Live application | [skillswap.vercel.app](https://2230957-s6-skillswap.vercel.app/) |
-| API documentation | [OpenAPI UI](https://2230957-s6-skillswap.vercel.app/api/docs) · [OpenAPI schema](https://2230957-s6-skillswap.vercel.app/api/openapi.json) |
+# Final Project Submission Report
+
+**Submitted by:**<br>
+Name: Saker Ahmed Shimul<br>
+Student ID: 2230957<br>
+Section: 06
+
+**Project Title:** SkillSwap<br>
+**Vercel URL:** [https://2230957-s6-skillswap.vercel.app/](https://2230957-s6-skillswap.vercel.app/)<br>
+**GitHub Repository:** [https://github.com/Saker001/2230957-S6-SkillSwap](https://github.com/Saker001/2230957-S6-SkillSwap)
+
+**Submitted To:**<br>
+Sayef Reyadh<br>
+Adjunct Lecturer<br>
+Department of Computer Science & Engineering<br>
+Independent University, Bangladesh
+
+**Semester:** Autumn 2026
+**Date of Submission:** 27 November 2026
+
+---
+
+# SkillSwap — Project Details
+
+**API documentation:** [OpenAPI UI](https://2230957-s6-skillswap.vercel.app/api/docs) · [OpenAPI schema](https://2230957-s6-skillswap.vercel.app/api/openapi.json)
 
 ## 1. Executive summary
 
@@ -91,6 +108,7 @@ docs/
   01-prd.md               Product requirements
   02-srs.md               Software requirements and acceptance criteria
   03-tdd.md               Technical design
+  FINAL_REPORT.md         Final project submission report
 ```
 
 ### API surface
@@ -140,7 +158,7 @@ The backend tests use a temporary SQLite database and cover resource CRUD, owner
 
 ## 8. Submission evidence and project management
 
-No current authenticated screenshots or narrated demo video are included in this Markdown report. The existing `docs/assets/live-deployment-blocked.png` captured an earlier HTTP 500 condition and is stale; it must not be used as evidence of the current deployment or successful authenticated behavior. `FINAL_REPORT.pdf` may also reflect the earlier deployment memo and should be treated as outdated until it is reviewed and regenerated to match verified evidence.
+No current authenticated screenshots or narrated demo video are included in this Markdown report. The existing `assets/live-deployment-blocked.png` captured an earlier HTTP 500 condition and is stale; it must not be used as evidence of the current deployment or successful authenticated behavior. The earlier root-level PDF was removed from the latest `main` branch and has not been regenerated; submit the Markdown report unless an updated PDF is produced from verified content.
 
 The remaining evidence work belongs to the student/instructor submission process: verify the deployed flows with authorized demo accounts, capture genuine screenshots of user and admin paths (including a denied action), record the required narrated video, and update any PDF only after those checks. Do not fabricate screenshots, account state, or test outcomes.
 
@@ -154,8 +172,8 @@ SkillSwap has a functioning full-stack implementation in the repository with aut
 
 ## 10. References
 
-1. SkillSwap [Product Requirements Document](docs/01-prd.md).
-2. SkillSwap [Software Requirements Specification](docs/02-srs.md).
-3. SkillSwap [Technical Design Document](docs/03-tdd.md).
+1. SkillSwap [Product Requirements Document](01-prd.md).
+2. SkillSwap [Software Requirements Specification](02-srs.md).
+3. SkillSwap [Technical Design Document](03-tdd.md).
 4. SkillSwap source repository: [Saker001/2230957-S6-SkillSwap](https://github.com/Saker001/2230957-S6-SkillSwap).
 5. Deployed application and API references linked in Section 6.
