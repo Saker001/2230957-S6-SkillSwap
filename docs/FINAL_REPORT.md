@@ -158,7 +158,7 @@ The backend tests use a temporary SQLite database and cover resource CRUD, owner
 
 ## 8. Submission evidence and project management
 
-No current authenticated screenshots or narrated demo video are included in this Markdown report. The existing `assets/live-deployment-blocked.png` captured an earlier HTTP 500 condition and is stale; it must not be used as evidence of the current deployment or successful authenticated behavior. The root-level [PDF report](../FINAL_REPORT.pdf) may also reflect the earlier deployment memo and should be treated as outdated until it is reviewed and regenerated to match verified evidence.
+No current authenticated screenshots or narrated demo video are included in this Markdown report. The existing `assets/live-deployment-blocked.png` captured an earlier HTTP 500 condition and is stale; it must not be used as evidence of the current deployment or successful authenticated behavior. The earlier root-level PDF was removed from the latest `main` branch and has not been regenerated; submit the Markdown report unless an updated PDF is produced from verified content.
 
 The remaining evidence work belongs to the student/instructor submission process: verify the deployed flows with authorized demo accounts, capture genuine screenshots of user and admin paths (including a denied action), record the required narrated video, and update any PDF only after those checks. Do not fabricate screenshots, account state, or test outcomes.
 

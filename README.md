@@ -67,7 +67,7 @@ Public signup cannot assign roles. Admin endpoints independently enforce the adm
 - [Product Requirements Document (PRD)](docs/01-prd.md) — product goals, users, release scope, and success criteria.
 - [Software Requirements Specification (SRS)](docs/02-srs.md) — functional, non-functional, and interface requirements.
 - [Technical Design Document (TDD)](docs/03-tdd.md) — current architecture and proposed implementation design.
-- [Final project report](docs/FINAL_REPORT.md) and [PDF](FINAL_REPORT.pdf) — project details, verification status, and submission evidence notes.
+- [Final project report](docs/FINAL_REPORT.md) — project details, verification status, and submission evidence notes.
 
 ## Technology stack
 
