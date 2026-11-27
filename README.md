@@ -237,6 +237,37 @@ python backend\seed_demo.py --apply
 
 Required account variables are `DEMO_ADMIN_1_EMAIL`, `DEMO_ADMIN_2_EMAIL`, and `DEMO_MEMBER_1_EMAIL` through `DEMO_MEMBER_3_EMAIL`; provide the corresponding `_PASSWORD` only for accounts that need to be created. `DEMO_GROUP_NAME` is optional. Do not put secret values in command history, files, screenshots, reports, or source control. The script prints account IDs and roles, not email addresses or passwords. It never resets an existing password or changes an existing account's role or status; conflicting existing accounts, groups, or permissions stop the run. Re-running a successful seed reuses the same records.
 
+### One-time administrator bootstrap
+
+Use `backend/create_admin.py` when you need to create the first administrator without provisioning demo data. It requires a PostgreSQL `DATABASE_URL`, the deployment's `JWT_SECRET_KEY` and `PASSWORD_PEPPER`, and `ADMIN_EMAIL`, `ADMIN_DISPLAY_NAME`, and `ADMIN_PASSWORD` in the process environment. The credentials are validated with the signup rules, and new passwords are stored using the backend's Argon2 hashing and pepper. The script never prints credential or database connection values. It only creates an active administrator when no account exists for the email; an existing active, unbanned administrator is reused without changing its password. A regular, banned, or inactive account is never modified. No public admin-signup endpoint is provided.
+
+The default is a read-only dry run:
+
+```powershell
+python backend\create_admin.py
+```
+
+In PowerShell, read the account credentials interactively so the password is not entered in command history. Load the PostgreSQL URL and matching deployment secrets into the process environment through an approved secret manager first:
+
+```powershell
+$env:ADMIN_EMAIL = Read-Host "Administrator email"
+$env:ADMIN_DISPLAY_NAME = Read-Host "Administrator display name"
+$securePassword = Read-Host "Administrator password" -AsSecureString
+$passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
+try {
+    $env:ADMIN_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+} finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer)
+}
+python backend\create_admin.py
+$env:ADMIN_BOOTSTRAP_CONFIRM = "CREATE_SKILLSWAP_ADMIN_ACCOUNT"
+python backend\create_admin.py --apply
+Remove-Item Env:ADMIN_EMAIL, Env:ADMIN_DISPLAY_NAME, Env:ADMIN_PASSWORD, Env:ADMIN_BOOTSTRAP_CONFIRM
+Remove-Variable securePassword, passwordPointer
+```
+
+Both `--apply` and the exact `ADMIN_BOOTSTRAP_CONFIRM` value are required to write. Do not run this utility against a deployed database unless you are explicitly carrying out an approved bootstrap; never place credentials in source control, command arguments, or reports.
+
 | Demo account | Role | Account ID |
 | --- | --- | --- |
 | Admin 1 | Administrator | Not provisioned; no production database access in this run |
